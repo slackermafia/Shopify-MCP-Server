@@ -1384,10 +1384,9 @@ const handlers = {
               title
               productType
               category {
-                productTaxonomyNode {
-                  id
-                  name
-                }
+                id
+                name
+                fullName
               }
             }
             userErrors {
