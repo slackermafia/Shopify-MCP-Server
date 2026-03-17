@@ -1377,15 +1377,17 @@ const handlers = {
       }
 
       const mutation = `
-        mutation SetProductCategory($input: ProductInput!) {
-          productUpdate(input: $input) {
+        mutation SetProductCategory($product: ProductUpdateInput!) {
+          productUpdate(product: $product) {
             product {
               id
               title
               productType
-              taxonomyNode {
-                id
-                name
+              category {
+                productTaxonomyNode {
+                  id
+                  name
+                }
               }
             }
             userErrors {
@@ -1397,9 +1399,9 @@ const handlers = {
       `;
 
       const variables = {
-        input: {
+        product: {
           id: `gid://shopify/Product/${numericId}`,
-          productTaxonomyNodeId: args.taxonomy_node_id,
+          category: args.taxonomy_node_id,
         },
       };
 
