@@ -65,6 +65,7 @@ async function shopifyGQL(query, variables = {}) {
 const server = new Server({
   name: 'Shopify MCP Server',
   version: '1.0.0',
+  capabilities: {},
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
