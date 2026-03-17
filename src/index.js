@@ -1168,13 +1168,13 @@ const TOOLS = [
   },
   {
     name: 'publish_product_to_channel',
-    description: 'Publish a product to a specific sales channel (publication). Use list_publications to get publication IDs.',
+    description: 'Publish a product to one or more sales channels. Use list_publications to get IDs. Pass multiple IDs as comma-separated string to publish to all channels at once.',
     inputSchema: {
       type: 'object',
-      required: ['product_id', 'publication_id'],
+      required: ['product_id', 'publication_ids'],
       properties: {
         product_id: { type: 'string' },
-        publication_id: { type: 'string', description: 'Publication ID from list_publications' },
+        publication_ids: { type: 'string', description: 'Comma-separated publication IDs (e.g. "76412649680,78387183824,76416090320"). Get IDs from list_publications.' },
       },
     },
   },
@@ -1837,20 +1837,41 @@ async function handleTool(name, args) {
 
     // ── PUBLICATIONS (Sales Channels) ────────────────────────────────────────
     case 'list_publications': {
+      // REST GET /publications.json returns all sales channels with numeric IDs
       const data = await shopifyREST('/publications.json');
       return ok(data.publications);
     }
     case 'publish_product_to_channel': {
-      const data = await shopifyREST(`/products/${args.product_id}/publications.json`, {
-        method: 'POST',
-        body: JSON.stringify({ publication: { publication_id: args.publication_id } }),
-      });
-      return ok(data.publication);
+      // REST POST /products/{id}/publications.json was removed in Shopify 2023-04.
+      // Use GraphQL publishablePublish mutation instead.
+      const productGid = `gid://shopify/Product/${args.product_id}`;
+      const ids = String(args.publication_ids).split(',').map(id => id.trim()).filter(Boolean);
+      const pubInputs = ids.map(id => ({ publicationId: `gid://shopify/Publication/${id}` }));
+      const mutation = `
+        mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+          publishablePublish(id: $id, input: $input) {
+            publishable { ... on Product { id title } }
+            userErrors { field message }
+          }
+        }`;
+      const data = await shopifyGQL(mutation, { id: productGid, input: pubInputs });
+      const result = data.publishablePublish;
+      if (result.userErrors?.length) throw new Error(result.userErrors.map(e => e.message).join(', '));
+      return ok({ success: true, product_id: args.product_id, published_to_count: ids.length, publication_ids: ids });
     }
     case 'unpublish_product_from_channel': {
-      await shopifyREST(`/products/${args.product_id}/publications/${args.publication_id}.json`, {
-        method: 'DELETE',
-      });
+      const productGid = `gid://shopify/Product/${args.product_id}`;
+      const pubGid = `gid://shopify/Publication/${args.publication_id}`;
+      const mutation = `
+        mutation publishableUnpublish($id: ID!, $input: [PublicationInput!]!) {
+          publishableUnpublish(id: $id, input: $input) {
+            publishable { ... on Product { id title } }
+            userErrors { field message }
+          }
+        }`;
+      const data = await shopifyGQL(mutation, { id: productGid, input: [{ publicationId: pubGid }] });
+      const result = data.publishableUnpublish;
+      if (result.userErrors?.length) throw new Error(result.userErrors.map(e => e.message).join(', '));
       return ok({ success: true, product_id: args.product_id, publication_id: args.publication_id });
     }
 
