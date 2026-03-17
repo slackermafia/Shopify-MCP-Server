@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { readFileSync } from 'node:fs';
+import { basename, extname } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -1286,7 +1288,7 @@ const tools = [
   },
   {
     name: 'add_product_image_base64',
-    description: 'Upload a base64-encoded image and attach it to a product (uses staged uploads)',
+    description: 'Upload an image and attach it to a product. Accepts either a local file path or a base64-encoded string (uses Shopify staged uploads)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1294,24 +1296,28 @@ const tools = [
           type: 'string',
           description: 'The product ID (numeric or GID)',
         },
+        file_path: {
+          type: 'string',
+          description: 'Absolute path to an image file on disk (e.g. "/Users/sean/images/sign.png"). Alternative to base64_image.',
+        },
         base64_image: {
           type: 'string',
-          description: 'The base64-encoded image data (no data:image prefix, just the raw base64 string)',
+          description: 'The base64-encoded image data (no data:image prefix). Alternative to file_path.',
         },
         filename: {
           type: 'string',
-          description: 'Filename for the image (e.g. "photo.png"). Defaults to "image.png"',
+          description: 'Filename for the image (e.g. "photo.png"). Auto-detected from file_path if omitted.',
         },
         mime_type: {
           type: 'string',
-          description: 'MIME type of the image (e.g. "image/png", "image/jpeg"). Defaults to "image/png"',
+          description: 'MIME type (e.g. "image/png", "image/jpeg"). Auto-detected from file_path if omitted.',
         },
         alt_text: {
           type: 'string',
           description: 'Alt text for the image (optional)',
         },
       },
-      required: ['product_id', 'base64_image'],
+      required: ['product_id'],
     },
   },
   {
@@ -2556,7 +2562,29 @@ const handlers = {
 
   add_product_image_base64: async (args) => {
     try {
-      const { product_id, base64_image, filename, mime_type, alt_text } = args;
+      const { product_id, base64_image, file_path, alt_text } = args;
+      let { filename, mime_type } = args;
+
+      // Resolve the image buffer from either file_path or base64_image
+      let imageBuffer;
+      if (file_path) {
+        imageBuffer = readFileSync(file_path);
+        if (!filename) filename = basename(file_path);
+        if (!mime_type) {
+          const ext = extname(file_path).toLowerCase();
+          const mimeMap = {
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+          };
+          mime_type = mimeMap[ext] || 'image/png';
+        }
+      } else if (base64_image) {
+        imageBuffer = Buffer.from(base64_image, 'base64');
+      } else {
+        throw new Error('Either file_path or base64_image must be provided');
+      }
+      filename = filename || 'image.png';
+      mime_type = mime_type || 'image/png';
 
       // Step 1: Create a staged upload target
       const stagedMutation = `
@@ -2595,8 +2623,7 @@ const handlers = {
 
       const target = stagedResult.stagedUploadsCreate.stagedTargets[0];
 
-      // Step 2: Upload the base64-decoded image to the staged URL via multipart form POST
-      const imageBuffer = Buffer.from(base64_image, 'base64');
+      // Step 2: Upload the image to the staged URL via multipart form POST
       const boundary = '----FormBoundary' + Date.now().toString(36);
       const parts = [];
 
