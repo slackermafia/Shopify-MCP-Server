@@ -1284,6 +1284,66 @@ const tools = [
       properties: {},
     },
   },
+  {
+    name: 'add_product_image_base64',
+    description: 'Upload a base64-encoded image and attach it to a product (uses staged uploads)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        product_id: {
+          type: 'string',
+          description: 'The product ID (numeric or GID)',
+        },
+        base64_image: {
+          type: 'string',
+          description: 'The base64-encoded image data (no data:image prefix, just the raw base64 string)',
+        },
+        filename: {
+          type: 'string',
+          description: 'Filename for the image (e.g. "photo.png"). Defaults to "image.png"',
+        },
+        mime_type: {
+          type: 'string',
+          description: 'MIME type of the image (e.g. "image/png", "image/jpeg"). Defaults to "image/png"',
+        },
+        alt_text: {
+          type: 'string',
+          description: 'Alt text for the image (optional)',
+        },
+      },
+      required: ['product_id', 'base64_image'],
+    },
+  },
+  {
+    name: 'set_variant_metafield',
+    description: 'Set or update a metafield on a specific product variant',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        variant_id: {
+          type: 'string',
+          description: 'The variant ID (numeric or GID like "gid://shopify/ProductVariant/12345")',
+        },
+        namespace: {
+          type: 'string',
+          description: 'Metafield namespace (e.g. "custom", "my_fields")',
+        },
+        key: {
+          type: 'string',
+          description: 'Metafield key (e.g. "material", "dimensions")',
+        },
+        type: {
+          type: 'string',
+          description: 'Metafield type (e.g. "single_line_text_field", "number_integer", "json", "boolean")',
+        },
+        value: {
+          type: 'string',
+          description: 'Metafield value (must be a string — for JSON types, pass a JSON string)',
+        },
+      },
+      required: ['variant_id', 'namespace', 'key', 'type', 'value'],
+    },
+  },
 ];
 
 // ─── Tool Handlers ────────────────────────────────────────────────────────────
@@ -2489,6 +2549,183 @@ const handlers = {
       `;
       const result = await shopifyGQL(query);
       return ok(result.shop);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  add_product_image_base64: async (args) => {
+    try {
+      const { product_id, base64_image, filename, mime_type, alt_text } = args;
+
+      // Step 1: Create a staged upload target
+      const stagedMutation = `
+        mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+          stagedUploadsCreate(input: $input) {
+            stagedTargets {
+              url
+              resourceUrl
+              parameters {
+                name
+                value
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const stagedResult = await shopifyGQL(stagedMutation, {
+        input: [
+          {
+            filename: filename || 'image.png',
+            mimeType: mime_type || 'image/png',
+            httpMethod: 'POST',
+            resource: 'IMAGE',
+          },
+        ],
+      });
+      if (stagedResult.stagedUploadsCreate.userErrors?.length) {
+        throw new Error(
+          `Staged upload errors: ${JSON.stringify(stagedResult.stagedUploadsCreate.userErrors)}`
+        );
+      }
+
+      const target = stagedResult.stagedUploadsCreate.stagedTargets[0];
+
+      // Step 2: Upload the base64-decoded image to the staged URL via multipart form POST
+      const imageBuffer = Buffer.from(base64_image, 'base64');
+      const boundary = '----FormBoundary' + Date.now().toString(36);
+      const parts = [];
+
+      // Add all parameters from the staged target
+      for (const param of target.parameters) {
+        parts.push(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${param.name}"\r\n\r\n${param.value}\r\n`
+        );
+      }
+
+      // Add the file part
+      const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename || 'image.png'}"\r\nContent-Type: ${mime_type || 'image/png'}\r\n\r\n`;
+      const fileFooter = `\r\n--${boundary}--\r\n`;
+
+      const headerBuf = Buffer.from(fileHeader, 'utf-8');
+      const footerBuf = Buffer.from(fileFooter, 'utf-8');
+      const paramsBuf = Buffer.from(parts.join(''), 'utf-8');
+      const body = Buffer.concat([paramsBuf, headerBuf, imageBuffer, footerBuf]);
+
+      const uploadRes = await fetch(target.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length.toString(),
+        },
+        body,
+      });
+
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        throw new Error(`Upload failed (${uploadRes.status}): ${errText}`);
+      }
+
+      // Step 3: Attach the uploaded image to the product
+      let numericId = product_id;
+      if (product_id.includes('/')) {
+        const idParts = product_id.split('/');
+        numericId = idParts[idParts.length - 1];
+      }
+
+      const mediaMutation = `
+        mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+          productCreateMedia(productId: $productId, media: $media) {
+            media {
+              ... on MediaImage {
+                id
+                image {
+                  url
+                  altText
+                }
+              }
+            }
+            mediaUserErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const mediaResult = await shopifyGQL(mediaMutation, {
+        productId: `gid://shopify/Product/${numericId}`,
+        media: [
+          {
+            originalSource: target.resourceUrl,
+            mediaContentType: 'IMAGE',
+            alt: alt_text || '',
+          },
+        ],
+      });
+      if (mediaResult.productCreateMedia.mediaUserErrors?.length) {
+        throw new Error(
+          `Media errors: ${JSON.stringify(mediaResult.productCreateMedia.mediaUserErrors)}`
+        );
+      }
+      return ok(mediaResult.productCreateMedia.media);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  set_variant_metafield: async (args) => {
+    try {
+      const { variant_id, namespace, key, type, value } = args;
+
+      let variantGid = variant_id;
+      if (!variant_id.startsWith('gid://')) {
+        variantGid = `gid://shopify/ProductVariant/${variant_id}`;
+      }
+
+      const mutation = `
+        mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields {
+              id
+              namespace
+              key
+              value
+              type
+              owner {
+                ... on ProductVariant {
+                  id
+                  title
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        metafields: [
+          {
+            ownerId: variantGid,
+            namespace,
+            key,
+            type,
+            value,
+          },
+        ],
+      });
+      if (result.metafieldsSet.userErrors?.length) {
+        throw new Error(
+          `Metafield errors: ${JSON.stringify(result.metafieldsSet.userErrors)}`
+        );
+      }
+      return ok(result.metafieldsSet.metafields);
     } catch (error) {
       return err(error.message);
     }

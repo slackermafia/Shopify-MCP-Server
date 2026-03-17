@@ -4,18 +4,16 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 
 ## Features
 
-- **Products** — list, create, update, delete, publish/unpublish, variants CRUD, images, metafields
+- **Products** — list, create, update, delete, publish/unpublish, variants CRUD, images (URL and base64), metafields, category taxonomy
 - **Collections** — custom & smart collections, add products, list collection products
 - **Orders** — list, get, create, update, cancel, close, fulfill, refund, transactions
 - **Draft Orders** — list, create, complete
 - **Customers** — list, search, get, create, update, delete, customer order history
 - **Inventory** — locations, get/adjust/set inventory levels
 - **Metaobjects** — definitions (list/create) and entries (list/create/update/delete) via GraphQL
-- **Metafields** — get/set on any resource (products, orders, customers, collections, shop, etc.)
+- **Metafields** — get/set on products and variants
 - **Discounts** — price rules and discount codes (list, create, delete)
-- **Reports** — sales summary, orders/customers/products counts
-- **Pages & Blogs** — list pages, create/update pages, list blogs, create articles
-- **Webhooks** — list, create, delete
+- **Publishing** — list sales channels, publish/unpublish products to channels
 
 ## Installation
 
@@ -62,7 +60,7 @@ node src/index.js
 
 **Recommended scopes:** `read_products`, `write_products`, `read_orders`, `write_orders`, `read_customers`, `write_customers`, `read_inventory`, `write_inventory`, `read_price_rules`, `write_price_rules`, `read_discounts`, `write_discounts`, `read_content`, `write_content`, `read_metaobjects`, `write_metaobjects`
 
-## Available Tools (68)
+## Available Tools (61)
 
 ### Shop
 | Tool | Description |
@@ -78,6 +76,8 @@ node src/index.js
 | `update_product` | Update title, description, vendor, status, tags |
 | `delete_product` | Permanently delete a product |
 | `publish_product` | Publish or unpublish a product |
+| `set_product_category` | Set product category using Shopify standard taxonomy (GraphQL) |
+| `list_product_taxonomy` | List all product categories in the Shopify taxonomy |
 | `list_product_variants` | List all variants for a product |
 | `create_product_variant` | Add a new variant (price, SKU, options, inventory) |
 | `update_product_variant` | Update a variant's price, SKU, weight, options |
@@ -85,6 +85,19 @@ node src/index.js
 | `get_product_metafields` | Get metafields on a product |
 | `set_product_metafield` | Create or update a metafield on a product |
 | `add_product_image` | Add an image to a product by URL |
+| `add_product_image_base64` | Upload a base64-encoded image and attach it to a product (uses staged uploads) |
+
+### Variant Metafields
+| Tool | Description |
+|------|-------------|
+| `set_variant_metafield` | Set or update a metafield on a specific product variant |
+
+### Publishing / Sales Channels
+| Tool | Description |
+|------|-------------|
+| `list_publications` | List all sales channels / publications the store has enabled |
+| `publish_product_to_channel` | Publish a product to one or more sales channels |
+| `unpublish_product_from_channel` | Remove a product from a specific sales channel |
 
 ### Collections
 | Tool | Description |
@@ -154,36 +167,6 @@ node src/index.js
 | `update_metaobject` | Update metaobject fields |
 | `delete_metaobject` | Delete a metaobject entry |
 
-### Metafields (Generic)
-| Tool | Description |
-|------|-------------|
-| `list_metafields` | List metafields on any resource |
-| `set_metafield` | Create/update a metafield on any resource |
-
-### Reports & Analytics
-| Tool | Description |
-|------|-------------|
-| `get_sales_report` | Revenue, order count, AOV for a date range |
-| `get_orders_count` | Count orders with filters |
-| `get_customers_count` | Total customer count |
-| `get_products_count` | Total product count |
-
-### Pages & Blogs
-| Tool | Description |
-|------|-------------|
-| `list_pages` | List storefront pages |
-| `create_page` | Create a new page |
-| `update_page` | Update a page |
-| `list_blogs` | List all blogs |
-| `create_article` | Create a blog article |
-
-### Webhooks
-| Tool | Description |
-|------|-------------|
-| `list_webhooks` | List all webhook subscriptions |
-| `create_webhook` | Create a new webhook (e.g. orders/create) |
-| `delete_webhook` | Delete a webhook |
-
 ## Requirements
 
 - Node.js 18+
@@ -191,7 +174,7 @@ node src/index.js
 
 ## A note on Shopify's REST API
 
-Shopify marked the REST Admin API as **legacy as of October 1, 2024**, with new public apps required to use GraphQL exclusively from April 2025 onward. This server uses the latest stable REST API version (`2026-01`) for broad compatibility with private/custom apps and is fully functional. The metaobjects feature already uses GraphQL. Future versions of this server may migrate remaining endpoints to GraphQL.
+Shopify marked the REST Admin API as **legacy as of October 1, 2024**, with new public apps required to use GraphQL exclusively from April 2025 onward. This server uses the latest stable REST API version (`2026-01`) for broad compatibility with private/custom apps and is fully functional. The metaobjects, product taxonomy, publishing, and image upload features already use GraphQL. Future versions of this server may migrate remaining endpoints to GraphQL.
 
 ## License
 
