@@ -54,606 +54,29 @@ async function shopifyGQL(query, variables = {}) {
     const body = await res.text();
     throw new Error(`Shopify GraphQL ${res.status}: ${body}`);
   }
-  const data = await res.json();
-  if (data.errors && data.errors.length > 0) {
-    throw new Error(`GraphQL Error: ${JSON.stringify(data.errors)}`);
+  const json = await res.json();
+  if (json.errors?.length) {
+    throw new Error(`GraphQL errors: ${JSON.stringify(json.errors)}`);
   }
-  return data.data;
+  return json.data;
 }
 
-// ─── Product Operations ─────────────────────────────────────────────────────
-async function getProduct(productId) {
-  return shopifyREST(`/products/${productId}.json`);
+function ok(data) {
+  return { success: true, data };
 }
 
-async function updateProduct(productId, product) {
-  return shopifyREST(`/products/${productId}.json`, {
-    method: 'PUT',
-    body: JSON.stringify({ product }),
-  });
+function err(message) {
+  return { success: false, error: message };
 }
 
-async function createProduct(product) {
-  return shopifyREST('/products.json', {
-    method: 'POST',
-    body: JSON.stringify({ product }),
-  });
-}
-
-async function deleteProduct(productId) {
-  return shopifyREST(`/products/${productId}.json`, {
-    method: 'DELETE',
-  });
-}
-
-async function listProducts(options = {}) {
-  const params = new URLSearchParams(options);
-  return shopifyREST(`/products.json?${params}`);
-}
-
-// ─── Variant Operations ─────────────────────────────────────────────────────
-async function createProductVariant(productId, variant) {
-  return shopifyREST(`/products/${productId}/variants.json`, {
-    method: 'POST',
-    body: JSON.stringify({ variant }),
-  });
-}
-
-async function updateProductVariant(variantId, variant) {
-  return shopifyREST(`/variants/${variantId}.json`, {
-    method: 'PUT',
-    body: JSON.stringify({ variant }),
-  });
-}
-
-async function deleteProductVariant(productId, variantId) {
-  return shopifyREST(`/products/${productId}/variants/${variantId}.json`, {
-    method: 'DELETE',
-  });
-}
-
-// ─── Collection Operations ──────────────────────────────────────────────────
-async function listCollections(options = {}) {
-  const params = new URLSearchParams(options);
-  return shopifyREST(`/collections.json?${params}`);
-}
-
-async function getCollection(collectionId) {
-  return shopifyREST(`/collections/${collectionId}.json`);
-}
-
-async function createCollection(collection) {
-  return shopifyREST('/custom_collections.json', {
-    method: 'POST',
-    body: JSON.stringify({ custom_collection: collection }),
-  });
-}
-
-async function updateCollection(collectionId, collection) {
-  return shopifyREST(`/custom_collections/${collectionId}.json`, {
-    method: 'PUT',
-    body: JSON.stringify({ custom_collection: collection }),
-  });
-}
-
-async function addProductToCollection(collectionId, productId) {
-  return shopifyREST(`/collects.json`, {
-    method: 'POST',
-    body: JSON.stringify({
-      collect: {
-        collection_id: collectionId,
-        product_id: productId,
-      },
-    }),
-  });
-}
-
-// ─── Customer Operations ────────────────────────────────────────────────────
-async function listCustomers(options = {}) {
-  const params = new URLSearchParams(options);
-  return shopifyREST(`/customers.json?${params}`);
-}
-
-async function getCustomer(customerId) {
-  return shopifyREST(`/customers/${customerId}.json`);
-}
-
-async function searchCustomers(query) {
-  const params = new URLSearchParams({ query });
-  return shopifyREST(`/customers/search.json?${params}`);
-}
-
-async function createCustomer(customer) {
-  return shopifyREST('/customers.json', {
-    method: 'POST',
-    body: JSON.stringify({ customer }),
-  });
-}
-
-async function updateCustomer(customerId, customer) {
-  return shopifyREST(`/customers/${customerId}.json`, {
-    method: 'PUT',
-    body: JSON.stringify({ customer }),
-  });
-}
-
-async function deleteCustomer(customerId) {
-  return shopifyREST(`/customers/${customerId}.json`, {
-    method: 'DELETE',
-  });
-}
-
-// ─── Order Operations ───────────────────────────────────────────────────────
-async function listOrders(options = {}) {
-  const params = new URLSearchParams(options);
-  return shopifyREST(`/orders.json?${params}`);
-}
-
-async function getOrder(orderId) {
-  return shopifyREST(`/orders/${orderId}.json`);
-}
-
-async function updateOrder(orderId, order) {
-  return shopifyREST(`/orders/${orderId}.json`, {
-    method: 'PUT',
-    body: JSON.stringify({ order }),
-  });
-}
-
-async function cancelOrder(orderId, options = {}) {
-  return shopifyREST(`/orders/${orderId}/cancel.json`, {
-    method: 'POST',
-    body: JSON.stringify(options),
-  });
-}
-
-async function closeOrder(orderId) {
-  return shopifyREST(`/orders/${orderId}/close.json`, {
-    method: 'POST',
-  });
-}
-
-async function createDraftOrder(draftOrder) {
-  return shopifyREST('/draft_orders.json', {
-    method: 'POST',
-    body: JSON.stringify({ draft_order: draftOrder }),
-  });
-}
-
-async function completeDraftOrder(draftOrderId, paymentGateway = '') {
-  return shopifyREST(`/draft_orders/${draftOrderId}/complete.json`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      draft_order: {
-        payment_gateway: paymentGateway,
-      },
-    }),
-  });
-}
-
-// ─── Fulfillment & Refund Operations ────────────────────────────────────────
-async function fulfillOrder(orderId, fulfillment) {
-  return shopifyREST(`/orders/${orderId}/fulfillments.json`, {
-    method: 'POST',
-    body: JSON.stringify({ fulfillment }),
-  });
-}
-
-async function createRefund(orderId, refund) {
-  return shopifyREST(`/orders/${orderId}/refunds.json`, {
-    method: 'POST',
-    body: JSON.stringify({ refund }),
-  });
-}
-
-// ─── Price Rule & Discount Operations ───────────────────────────────────────
-async function listPriceRules(options = {}) {
-  const params = new URLSearchParams(options);
-  return shopifyREST(`/price_rules.json?${params}`);
-}
-
-async function createPriceRule(priceRule) {
-  return shopifyREST('/price_rules.json', {
-    method: 'POST',
-    body: JSON.stringify({ price_rule: priceRule }),
-  });
-}
-
-async function createDiscountCode(priceRuleId, discountCode) {
-  return shopifyREST(`/price_rules/${priceRuleId}/discount_codes.json`, {
-    method: 'POST',
-    body: JSON.stringify({ discount_code: discountCode }),
-  });
-}
-
-async function deleteDiscountCode(priceRuleId, discountCodeId) {
-  return shopifyREST(
-    `/price_rules/${priceRuleId}/discount_codes/${discountCodeId}.json`,
-    {
-      method: 'DELETE',
-    }
-  );
-}
-
-// ─── Inventory Operations ───────────────────────────────────────────────────
-async function getInventoryLevels(options = {}) {
-  const params = new URLSearchParams(options);
-  return shopifyREST(`/inventory_levels.json?${params}`);
-}
-
-async function adjustInventory(inventoryItemId, locationId, availableAdjustment) {
-  return shopifyREST('/inventory_levels/adjust.json', {
-    method: 'POST',
-    body: JSON.stringify({
-      inventory_item_id: inventoryItemId,
-      location_id: locationId,
-      available_adjustment: availableAdjustment,
-    }),
-  });
-}
-
-async function getLocations() {
-  return shopifyREST('/locations.json');
-}
-
-// ─── Metafield Operations ──────────────────────────────────────────────────
-async function getProductMetafields(productId, options = {}) {
-  const params = new URLSearchParams(options);
-  return shopifyREST(`/products/${productId}/metafields.json?${params}`);
-}
-
-async function setProductMetafield(productId, metafield) {
-  return shopifyREST(`/products/${productId}/metafields.json`, {
-    method: 'POST',
-    body: JSON.stringify({ metafield }),
-  });
-}
-
-// ─── Metaobject Operations ─────────────────────────────────────────────────
-async function listMetaobjectDefinitions(options = {}) {
-  const query = `
-    query {
-      metaobjectDefinitions(first: 100) {
-        edges {
-          node {
-            id
-            name
-            type
-            displayNameKey
-            description
-            fields {
-              name
-              key
-              type
-            }
-          }
-        }
-      }
-    }
-  `;
-  const result = await shopifyGQL(query);
-  return result.metaobjectDefinitions.edges.map((e) => e.node);
-}
-
-async function createMetaobjectDefinition(definition) {
-  const { name, type, fields, description } = definition;
-  const mutation = `
-    mutation CreateMetaobjectDefinition($input: MetaobjectDefinitionInput!) {
-      metaobjectDefinitionCreate(input: $input) {
-        metaobjectDefinition {
-          id
-          name
-          type
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `;
-  const variables = {
-    input: {
-      name,
-      type,
-      description,
-      fieldDefinitions: fields.map((f) => ({
-        name: f.name,
-        key: f.key,
-        type: f.type,
-        required: f.required || false,
-        description: f.description || '',
-      })),
-    },
-  };
-  const result = await shopifyGQL(mutation, variables);
-  return result.metaobjectDefinitionCreate.metaobjectDefinition;
-}
-
-async function listMetaobjects(type, options = {}) {
-  const first = options.limit || 20;
-  const query = `
-    query {
-      metaobjects(type: "${type}", first: ${first}) {
-        edges {
-          node {
-            id
-            handle
-            type
-            fields {
-              key
-              value
-            }
-          }
-        }
-      }
-    }
-  `;
-  const result = await shopifyGQL(query);
-  return result.metaobjects.edges.map((e) => e.node);
-}
-
-async function createMetaobject(type, fields, handle) {
-  const mutation = `
-    mutation CreateMetaobject($input: MetaobjectInput!) {
-      metaobjectCreate(input: $input) {
-        metaobject {
-          id
-          handle
-          type
-          fields {
-            key
-            value
-          }
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `;
-  const variables = {
-    input: {
-      type,
-      fields: fields.map((f) => ({
-        key: f.key,
-        value: f.value,
-      })),
-      ...(handle && { handle }),
-    },
-  };
-  const result = await shopifyGQL(mutation, variables);
-  return result.metaobjectCreate.metaobject;
-}
-
-async function updateMetaobject(id, fields) {
-  const mutation = `
-    mutation UpdateMetaobject($id: ID!, $input: MetaobjectInput!) {
-      metaobjectUpdate(id: $id, input: $input) {
-        metaobject {
-          id
-          fields {
-            key
-            value
-          }
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `;
-  const variables = {
-    id,
-    input: {
-      fields: fields.map((f) => ({
-        key: f.key,
-        value: f.value,
-      })),
-    },
-  };
-  const result = await shopifyGQL(mutation, variables);
-  return result.metaobjectUpdate.metaobject;
-}
-
-async function deleteMetaobject(id) {
-  const mutation = `
-    mutation DeleteMetaobject($id: ID!) {
-      metaobjectDelete(id: $id) {
-        deletedId
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `;
-  const result = await shopifyGQL(mutation, { id });
-  return result.metaobjectDelete;
-}
-
-// ─── Product Taxonomy (Category) Operations ────────────────────────────────
-async function getProductTaxonomy() {
-  const query = `
-    query {
-      productTaxonomy {
-        roots(first: 100) {
-          edges {
-            node {
-              id
-              name
-              children(first: 100) {
-                edges {
-                  node {
-                    id
-                    name
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  `;
-  const result = await shopifyGQL(query);
-  return result.productTaxonomy.roots.edges.map((e) => e.node);
-}
-
-async function listProductTaxonomy() {
-  const query = `
-    query {
-      productTaxonomy {
-        roots(first: 100) {
-          edges {
-            node {
-              id
-              name
-              children(first: 100) {
-                edges {
-                  node {
-                    id
-                    name
-                    children(first: 100) {
-                      edges {
-                        node {
-                          id
-                          name
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  `;
-  const result = await shopifyGQL(query);
-  const roots = [];
-  result.productTaxonomy.roots.edges.forEach((root) => {
-    roots.push(root.node);
-  });
-  return roots;
-}
-
-// ─── Publication (Sales Channel) Operations ────────────────────────────────
-async function listPublications() {
-  const query = `
-    query {
-      publications(first: 100) {
-        edges {
-          node {
-            id
-            name
-            handle
-            isActive
-          }
-        }
-      }
-    }
-  `;
-  const result = await shopifyGQL(query);
-  return result.publications.edges.map((e) => e.node);
-}
-
-async function publishProductToPublications(productId, publicationIds) {
-  // Publish one channel at a time to avoid race conditions
-  const results = [];
-  for (const publicationId of publicationIds) {
-    const mutation = `
-      mutation PublishProduct($input: PublishablePublishInput!) {
-        publishablePublish(input: $input) {
-          publishable {
-            id
-            onlineStoreUrl
-          }
-          shop {
-            name
-          }
-          userErrors {
-            field
-            message
-          }
-        }
-      }
-    `;
-    const variables = {
-      input: {
-        id: productId,
-        publicationIds: [publicationId],
-      },
-    };
-    const result = await shopifyGQL(mutation, variables);
-    results.push(result.publishablePublish);
-  }
-  return results;
-}
-
-async function unpublishProductFromPublication(productId, publicationId) {
-  const mutation = `
-    mutation UnpublishProduct($input: PublishableUnpublishInput!) {
-      publishableUnpublish(input: $input) {
-        publishable {
-          id
-        }
-        shop {
-          name
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `;
-  const variables = {
-    input: {
-      id: productId,
-      publicationIds: [publicationId],
-    },
-  };
-  const result = await shopifyGQL(mutation, variables);
-  return result.publishableUnpublish;
-}
-
-// ─── Shop Information ──────────────────────────────────────────────────────
-async function getShop() {
-  const query = `
-    query {
-      shop {
-        id
-        name
-        url
-        email
-        currencyCode
-        primaryDomain {
-          host
-          url
-        }
-      }
-    }
-  `;
-  const result = await shopifyGQL(query);
-  return result.shop;
-}
-
-// ─── MCP Server Definition ─────────────────────────────────────────────────
 const tools = [
   {
     name: 'get_product',
-    description: 'Get a single product by ID',
+    description: 'Fetch a single product by ID',
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
       },
       required: ['product_id'],
     },
@@ -668,22 +91,16 @@ const tools = [
           type: 'number',
           description: 'Max results (default 50, max 250)',
         },
-        status: {
-          type: 'string',
-          enum: ['active', 'archived', 'draft'],
-          description: 'Filter by status',
-        },
+        title: { type: 'string', description: 'Filter by title' },
         product_type: {
           type: 'string',
           description: 'Filter by product type',
         },
-        vendor: {
+        vendor: { type: 'string', description: 'Filter by vendor' },
+        status: {
           type: 'string',
-          description: 'Filter by vendor',
-        },
-        title: {
-          type: 'string',
-          description: 'Filter by title',
+          description: 'Filter by status',
+          enum: ['active', 'archived', 'draft'],
         },
         collection_id: {
           type: 'string',
@@ -698,41 +115,15 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: {
-          type: 'string',
-          description: 'Product title (required)',
-        },
-        body_html: {
-          type: 'string',
-          description: 'Product description (HTML)',
-        },
-        vendor: {
-          type: 'string',
-          description: 'Product vendor',
-        },
-        product_type: {
-          type: 'string',
-          description: 'Product type',
-        },
+        title: { type: 'string', description: 'Product title (required)' },
+        body_html: { type: 'string', description: 'Product description (HTML)' },
+        vendor: { type: 'string', description: 'Product vendor' },
+        product_type: { type: 'string', description: 'Product type' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
         status: {
           type: 'string',
-          enum: ['active', 'draft', 'archived'],
           description: 'Product status',
-        },
-        tags: {
-          type: 'string',
-          description: 'Comma-separated tags',
-        },
-        options: {
-          type: 'array',
-          description: 'Product options (e.g. Size, Color)',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              values: { type: 'array', items: { type: 'string' } },
-            },
-          },
+          enum: ['active', 'draft', 'archived'],
         },
         variants: {
           type: 'array',
@@ -742,17 +133,31 @@ const tools = [
             properties: {
               title: { type: 'string' },
               price: { type: 'string' },
-              compare_at_price: { type: 'string' },
               sku: { type: 'string' },
               barcode: { type: 'string' },
+              compare_at_price: { type: 'string' },
+              inventory_quantity: { type: 'number' },
+              taxable: { type: 'boolean' },
+              requires_shipping: { type: 'boolean' },
               weight: { type: 'number' },
               weight_unit: { type: 'string' },
-              inventory_quantity: { type: 'number' },
-              requires_shipping: { type: 'boolean' },
-              taxable: { type: 'boolean' },
               option1: { type: 'string' },
               option2: { type: 'string' },
               option3: { type: 'string' },
+            },
+          },
+        },
+        options: {
+          type: 'array',
+          description: 'Product options (e.g. Size, Color)',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              values: {
+                type: 'array',
+                items: { type: 'string' },
+              },
             },
           },
         },
@@ -774,8 +179,8 @@ const tools = [
             properties: {
               namespace: { type: 'string' },
               key: { type: 'string' },
-              type: { type: 'string' },
               value: { type: 'string' },
+              type: { type: 'string' },
             },
           },
         },
@@ -793,30 +198,15 @@ const tools = [
           type: 'string',
           description: 'The product ID (required)',
         },
-        title: {
-          type: 'string',
-          description: 'Product title',
-        },
-        body_html: {
-          type: 'string',
-          description: 'Product description (HTML)',
-        },
-        vendor: {
-          type: 'string',
-          description: 'Product vendor',
-        },
-        product_type: {
-          type: 'string',
-          description: 'Product type',
-        },
+        title: { type: 'string', description: 'Product title' },
+        body_html: { type: 'string', description: 'Product description (HTML)' },
+        vendor: { type: 'string', description: 'Product vendor' },
+        product_type: { type: 'string', description: 'Product type' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
         status: {
           type: 'string',
-          enum: ['active', 'draft', 'archived'],
           description: 'Product status',
-        },
-        tags: {
-          type: 'string',
-          description: 'Comma-separated tags',
+          enum: ['active', 'draft', 'archived'],
         },
         product_taxonomy_node_id: {
           type: 'string',
@@ -827,15 +217,30 @@ const tools = [
     },
   },
   {
-    name: 'delete_product',
-    description: 'Delete a product by ID',
+    name: 'set_product_category',
+    description: 'Set product category using Shopify standard taxonomy (GraphQL)',
     inputSchema: {
       type: 'object',
       properties: {
         product_id: {
           type: 'string',
-          description: 'The product ID',
+          description: 'The product ID (numeric ID or GID)',
         },
+        taxonomy_node_id: {
+          type: 'string',
+          description: 'Shopify standard product category GID (e.g. "gid://shopify/TaxonomyCategory/sg-4-17-2-17")',
+        },
+      },
+      required: ['product_id', 'taxonomy_node_id'],
+    },
+  },
+  {
+    name: 'delete_product',
+    description: 'Delete a product by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        product_id: { type: 'string', description: 'The product ID' },
       },
       required: ['product_id'],
     },
@@ -846,10 +251,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
         published: {
           type: 'boolean',
           description: 'true = active, false = draft',
@@ -864,14 +266,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
+        limit: { type: 'number', description: 'Max results' },
       },
       required: ['product_id'],
     },
@@ -882,62 +278,23 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
-        price: {
-          type: 'string',
-          description: 'Variant price (required)',
-        },
-        title: {
-          type: 'string',
-          description: 'Variant title',
-        },
-        sku: {
-          type: 'string',
-          description: 'Stock keeping unit',
-        },
-        barcode: {
-          type: 'string',
-          description: 'Barcode',
-        },
-        compare_at_price: {
-          type: 'string',
-          description: 'Compare at price',
-        },
-        weight: {
-          type: 'number',
-          description: 'Weight',
-        },
-        weight_unit: {
-          type: 'string',
-          description: 'Weight unit',
-        },
-        inventory_quantity: {
-          type: 'number',
-          description: 'Inventory quantity',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
+        price: { type: 'string', description: 'Variant price (required)' },
+        title: { type: 'string', description: 'Variant title' },
+        sku: { type: 'string', description: 'Stock keeping unit' },
+        barcode: { type: 'string', description: 'Barcode' },
+        compare_at_price: { type: 'string', description: 'Compare at price' },
+        inventory_quantity: { type: 'number', description: 'Inventory quantity' },
+        taxable: { type: 'boolean', description: 'Whether item is taxable' },
         requires_shipping: {
           type: 'boolean',
           description: 'Whether shipping is required',
         },
-        taxable: {
-          type: 'boolean',
-          description: 'Whether item is taxable',
-        },
-        option1: {
-          type: 'string',
-          description: 'Option 1 value',
-        },
-        option2: {
-          type: 'string',
-          description: 'Option 2 value',
-        },
-        option3: {
-          type: 'string',
-          description: 'Option 3 value',
-        },
+        weight: { type: 'number', description: 'Weight' },
+        weight_unit: { type: 'string', description: 'Weight unit' },
+        option1: { type: 'string', description: 'Option 1 value' },
+        option2: { type: 'string', description: 'Option 2 value' },
+        option3: { type: 'string', description: 'Option 3 value' },
       },
       required: ['product_id', 'price'],
     },
@@ -952,54 +309,21 @@ const tools = [
           type: 'string',
           description: 'The variant ID (required)',
         },
-        price: {
-          type: 'string',
-          description: 'Variant price',
-        },
-        title: {
-          type: 'string',
-          description: 'Variant title',
-        },
-        sku: {
-          type: 'string',
-          description: 'Stock keeping unit',
-        },
-        barcode: {
-          type: 'string',
-          description: 'Barcode',
-        },
-        compare_at_price: {
-          type: 'string',
-          description: 'Compare at price',
-        },
-        weight: {
-          type: 'number',
-          description: 'Weight',
-        },
-        weight_unit: {
-          type: 'string',
-          description: 'Weight unit',
-        },
+        price: { type: 'string', description: 'Variant price' },
+        title: { type: 'string', description: 'Variant title' },
+        sku: { type: 'string', description: 'Stock keeping unit' },
+        barcode: { type: 'string', description: 'Barcode' },
+        compare_at_price: { type: 'string', description: 'Compare at price' },
+        taxable: { type: 'boolean', description: 'Whether item is taxable' },
         requires_shipping: {
           type: 'boolean',
           description: 'Whether shipping is required',
         },
-        taxable: {
-          type: 'boolean',
-          description: 'Whether item is taxable',
-        },
-        option1: {
-          type: 'string',
-          description: 'Option 1 value',
-        },
-        option2: {
-          type: 'string',
-          description: 'Option 2 value',
-        },
-        option3: {
-          type: 'string',
-          description: 'Option 3 value',
-        },
+        weight: { type: 'number', description: 'Weight' },
+        weight_unit: { type: 'string', description: 'Weight unit' },
+        option1: { type: 'string', description: 'Option 1 value' },
+        option2: { type: 'string', description: 'Option 2 value' },
+        option3: { type: 'string', description: 'Option 3 value' },
       },
       required: ['variant_id'],
     },
@@ -1010,14 +334,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
-        variant_id: {
-          type: 'string',
-          description: 'The variant ID',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
+        variant_id: { type: 'string', description: 'The variant ID' },
       },
       required: ['product_id', 'variant_id'],
     },
@@ -1028,14 +346,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
-        namespace: {
-          type: 'string',
-          description: 'Filter by namespace',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
+        namespace: { type: 'string', description: 'Filter by namespace' },
       },
       required: ['product_id'],
     },
@@ -1046,22 +358,10 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
-        namespace: {
-          type: 'string',
-          description: 'Metafield namespace',
-        },
-        key: {
-          type: 'string',
-          description: 'Metafield key',
-        },
-        value: {
-          type: 'string',
-          description: 'Metafield value',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
+        namespace: { type: 'string', description: 'Metafield namespace' },
+        key: { type: 'string', description: 'Metafield key' },
+        value: { type: 'string', description: 'Metafield value' },
         type: {
           type: 'string',
           description: 'Metafield type (e.g. single_line_text_field, number_integer, json)',
@@ -1076,22 +376,13 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
-        src: {
-          type: 'string',
-          description: 'Image URL (required)',
-        },
-        alt: {
-          type: 'string',
-          description: 'Alt text',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
+        src: { type: 'string', description: 'Image URL (required)' },
+        alt: { type: 'string', description: 'Alt text' },
         variant_ids: {
           type: 'array',
-          items: { type: 'number' },
           description: 'Associate image with specific variants',
+          items: { type: 'number' },
         },
       },
       required: ['product_id', 'src'],
@@ -1103,14 +394,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
-        title: {
-          type: 'string',
-          description: 'Filter by title',
-        },
+        limit: { type: 'number', description: 'Max results' },
+        title: { type: 'string', description: 'Filter by title' },
       },
     },
   },
@@ -1120,10 +405,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        collection_id: {
-          type: 'string',
-          description: 'The collection ID',
-        },
+        collection_id: { type: 'string', description: 'The collection ID' },
       },
       required: ['collection_id'],
     },
@@ -1134,27 +416,24 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: {
-          type: 'string',
-          description: 'Collection title (required)',
-        },
-        body_html: {
-          type: 'string',
-          description: 'Collection description',
-        },
-        published: {
-          type: 'boolean',
-          description: 'Publish the collection',
-        },
+        title: { type: 'string', description: 'Collection title (required)' },
+        body_html: { type: 'string', description: 'Collection description' },
+        image_src: { type: 'string', description: 'Collection image URL' },
         sort_order: {
           type: 'string',
-          enum: ['alpha-asc', 'alpha-desc', 'best-selling', 'created', 'created-desc', 'manual', 'price-asc', 'price-desc'],
           description: 'Sort order',
+          enum: [
+            'alpha-asc',
+            'alpha-desc',
+            'best-selling',
+            'created',
+            'created-desc',
+            'manual',
+            'price-asc',
+            'price-desc',
+          ],
         },
-        image_src: {
-          type: 'string',
-          description: 'Collection image URL',
-        },
+        published: { type: 'boolean', description: 'Publish the collection' },
       },
       required: ['title'],
     },
@@ -1169,22 +448,10 @@ const tools = [
           type: 'string',
           description: 'The collection ID (required)',
         },
-        title: {
-          type: 'string',
-          description: 'Collection title',
-        },
-        body_html: {
-          type: 'string',
-          description: 'Collection description',
-        },
-        published: {
-          type: 'boolean',
-          description: 'Publish the collection',
-        },
-        sort_order: {
-          type: 'string',
-          description: 'Sort order',
-        },
+        title: { type: 'string', description: 'Collection title' },
+        body_html: { type: 'string', description: 'Collection description' },
+        sort_order: { type: 'string', description: 'Sort order' },
+        published: { type: 'boolean', description: 'Publish the collection' },
       },
       required: ['collection_id'],
     },
@@ -1195,14 +462,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        collection_id: {
-          type: 'string',
-          description: 'The collection ID',
-        },
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
+        collection_id: { type: 'string', description: 'The collection ID' },
+        product_id: { type: 'string', description: 'The product ID' },
       },
       required: ['collection_id', 'product_id'],
     },
@@ -1213,14 +474,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        collection_id: {
-          type: 'string',
-          description: 'The collection ID',
-        },
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
+        collection_id: { type: 'string', description: 'The collection ID' },
+        limit: { type: 'number', description: 'Max results' },
       },
       required: ['collection_id'],
     },
@@ -1233,18 +488,30 @@ const tools = [
       properties: {
         status: {
           type: 'string',
-          enum: ['open', 'closed', 'cancelled', 'any'],
           description: 'Order status',
+          enum: ['open', 'closed', 'cancelled', 'any'],
         },
         financial_status: {
           type: 'string',
-          enum: ['authorized', 'pending', 'paid', 'partially_paid', 'refunded', 'voided', 'any'],
           description: 'Financial status',
+          enum: [
+            'authorized',
+            'pending',
+            'paid',
+            'partially_paid',
+            'refunded',
+            'voided',
+            'any',
+          ],
         },
         fulfillment_status: {
           type: 'string',
-          enum: ['shipped', 'partial', 'unshipped', 'unfulfilled', 'any'],
           description: 'Fulfillment status',
+          enum: ['shipped', 'partial', 'unshipped', 'unfulfilled', 'any'],
+        },
+        customer_id: {
+          type: 'string',
+          description: 'Filter by customer ID',
         },
         created_at_min: {
           type: 'string',
@@ -1254,14 +521,7 @@ const tools = [
           type: 'string',
           description: 'ISO 8601 date',
         },
-        customer_id: {
-          type: 'string',
-          description: 'Filter by customer ID',
-        },
-        limit: {
-          type: 'number',
-          description: 'Max results (default 50)',
-        },
+        limit: { type: 'number', description: 'Max results (default 50)' },
       },
     },
   },
@@ -1271,10 +531,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        order_id: {
-          type: 'string',
-          description: 'The order ID',
-        },
+        order_id: { type: 'string', description: 'The order ID' },
       },
       required: ['order_id'],
     },
@@ -1309,18 +566,6 @@ const tools = [
             last_name: { type: 'string' },
           },
         },
-        note: {
-          type: 'string',
-          description: 'Order note',
-        },
-        tags: {
-          type: 'string',
-          description: 'Comma-separated tags',
-        },
-        financial_status: {
-          type: 'string',
-          description: 'Financial status',
-        },
         shipping_address: {
           type: 'object',
           properties: {
@@ -1333,6 +578,9 @@ const tools = [
             country: { type: 'string' },
           },
         },
+        note: { type: 'string', description: 'Order note' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
+        financial_status: { type: 'string', description: 'Financial status' },
         send_receipt: {
           type: 'boolean',
           description: 'Send receipt to customer',
@@ -1351,18 +599,9 @@ const tools = [
           type: 'string',
           description: 'The order ID (required)',
         },
-        note: {
-          type: 'string',
-          description: 'Order note',
-        },
-        tags: {
-          type: 'string',
-          description: 'Comma-separated tags',
-        },
-        email: {
-          type: 'string',
-          description: 'Customer email',
-        },
+        email: { type: 'string', description: 'Customer email' },
+        note: { type: 'string', description: 'Order note' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
         shipping_address: {
           type: 'object',
           description: 'Shipping address',
@@ -1383,20 +622,14 @@ const tools = [
         },
         reason: {
           type: 'string',
-          enum: ['customer', 'fraud', 'inventory', 'declined', 'other'],
           description: 'Cancel reason',
+          enum: ['customer', 'fraud', 'inventory', 'declined', 'other'],
         },
+        refund: { type: 'boolean', description: 'Refund payment' },
+        restock: { type: 'boolean', description: 'Restock inventory' },
         email: {
           type: 'boolean',
           description: 'Send cancellation email to customer',
-        },
-        refund: {
-          type: 'boolean',
-          description: 'Refund payment',
-        },
-        restock: {
-          type: 'boolean',
-          description: 'Restock inventory',
         },
       },
       required: ['order_id'],
@@ -1408,10 +641,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        order_id: {
-          type: 'string',
-          description: 'The order ID',
-        },
+        order_id: { type: 'string', description: 'The order ID' },
       },
       required: ['order_id'],
     },
@@ -1426,6 +656,10 @@ const tools = [
           type: 'string',
           description: 'The order ID (required)',
         },
+        location_id: {
+          type: 'string',
+          description: 'Location ID for fulfillment',
+        },
         line_items: {
           type: 'array',
           description: 'Specific line items to fulfill (omit to fulfill all)',
@@ -1437,22 +671,9 @@ const tools = [
             },
           },
         },
-        location_id: {
-          type: 'string',
-          description: 'Location ID for fulfillment',
-        },
-        tracking_company: {
-          type: 'string',
-          description: 'Tracking company',
-        },
-        tracking_number: {
-          type: 'string',
-          description: 'Tracking number',
-        },
-        tracking_url: {
-          type: 'string',
-          description: 'Tracking URL',
-        },
+        tracking_company: { type: 'string', description: 'Tracking company' },
+        tracking_number: { type: 'string', description: 'Tracking number' },
+        tracking_url: { type: 'string', description: 'Tracking URL' },
         notify_customer: {
           type: 'boolean',
           description: 'Notify customer of fulfillment',
@@ -1470,14 +691,6 @@ const tools = [
         order_id: {
           type: 'string',
           description: 'The order ID (required)',
-        },
-        note: {
-          type: 'string',
-          description: 'Refund note',
-        },
-        notify: {
-          type: 'boolean',
-          description: 'Notify customer',
         },
         refund_line_items: {
           type: 'array',
@@ -1498,8 +711,8 @@ const tools = [
         shipping: {
           type: 'object',
           properties: {
-            amount: { type: 'string' },
             full_refund: { type: 'boolean' },
+            amount: { type: 'string' },
           },
         },
         transactions: {
@@ -1507,13 +720,15 @@ const tools = [
           items: {
             type: 'object',
             properties: {
-              parent_id: { type: 'number' },
-              amount: { type: 'string' },
               kind: { type: 'string', enum: ['refund'] },
               gateway: { type: 'string' },
+              amount: { type: 'string' },
+              parent_id: { type: 'number' },
             },
           },
         },
+        note: { type: 'string', description: 'Refund note' },
+        notify: { type: 'boolean', description: 'Notify customer' },
       },
       required: ['order_id'],
     },
@@ -1524,10 +739,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        order_id: {
-          type: 'string',
-          description: 'The order ID',
-        },
+        order_id: { type: 'string', description: 'The order ID' },
       },
       required: ['order_id'],
     },
@@ -1540,13 +752,10 @@ const tools = [
       properties: {
         status: {
           type: 'string',
-          enum: ['open', 'invoice_sent', 'completed', 'any'],
           description: 'Draft order status',
+          enum: ['open', 'invoice_sent', 'completed', 'any'],
         },
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
+        limit: { type: 'number', description: 'Max results' },
       },
     },
   },
@@ -1573,26 +782,23 @@ const tools = [
           type: 'object',
           description: 'Customer object',
         },
-        note: {
-          type: 'string',
-          description: 'Draft order note',
-        },
-        tags: {
-          type: 'string',
-          description: 'Comma-separated tags',
-        },
-        discount: {
-          type: 'object',
-          properties: {
-            value: { type: 'string' },
-            title: { type: 'string' },
-            value_type: { type: 'string', enum: ['fixed_amount', 'percentage'] },
-          },
-        },
         shipping_address: {
           type: 'object',
           description: 'Shipping address',
         },
+        discount: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            value_type: {
+              type: 'string',
+              enum: ['fixed_amount', 'percentage'],
+            },
+            value: { type: 'string' },
+          },
+        },
+        note: { type: 'string', description: 'Draft order note' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
       },
       required: ['line_items'],
     },
@@ -1621,22 +827,10 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
-        created_at_min: {
-          type: 'string',
-          description: 'ISO 8601 date',
-        },
-        created_at_max: {
-          type: 'string',
-          description: 'ISO 8601 date',
-        },
-        updated_at_min: {
-          type: 'string',
-          description: 'ISO 8601 date',
-        },
+        limit: { type: 'number', description: 'Max results' },
+        created_at_min: { type: 'string', description: 'ISO 8601 date' },
+        created_at_max: { type: 'string', description: 'ISO 8601 date' },
+        updated_at_min: { type: 'string', description: 'ISO 8601 date' },
       },
     },
   },
@@ -1650,10 +844,7 @@ const tools = [
           type: 'string',
           description: 'Search query (e.g. "email:foo@bar.com" or "John Smith")',
         },
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
+        limit: { type: 'number', description: 'Max results' },
       },
       required: ['query'],
     },
@@ -1664,10 +855,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        customer_id: {
-          type: 'string',
-          description: 'The customer ID',
-        },
+        customer_id: { type: 'string', description: 'The customer ID' },
       },
       required: ['customer_id'],
     },
@@ -1678,38 +866,14 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        email: {
-          type: 'string',
-          description: 'Customer email (required)',
-        },
-        first_name: {
-          type: 'string',
-          description: 'First name',
-        },
-        last_name: {
-          type: 'string',
-          description: 'Last name',
-        },
-        phone: {
-          type: 'string',
-          description: 'Phone number',
-        },
-        note: {
-          type: 'string',
-          description: 'Customer note',
-        },
-        tags: {
-          type: 'string',
-          description: 'Comma-separated tags',
-        },
-        accepts_marketing: {
-          type: 'boolean',
-          description: 'Accepts marketing',
-        },
-        verified_email: {
-          type: 'boolean',
-          description: 'Email verified',
-        },
+        email: { type: 'string', description: 'Customer email (required)' },
+        first_name: { type: 'string', description: 'First name' },
+        last_name: { type: 'string', description: 'Last name' },
+        phone: { type: 'string', description: 'Phone number' },
+        note: { type: 'string', description: 'Customer note' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
+        accepts_marketing: { type: 'boolean', description: 'Accepts marketing' },
+        verified_email: { type: 'boolean', description: 'Email verified' },
         addresses: {
           type: 'array',
           description: 'Customer addresses',
@@ -1739,34 +903,13 @@ const tools = [
           type: 'string',
           description: 'The customer ID (required)',
         },
-        email: {
-          type: 'string',
-          description: 'Customer email',
-        },
-        first_name: {
-          type: 'string',
-          description: 'First name',
-        },
-        last_name: {
-          type: 'string',
-          description: 'Last name',
-        },
-        phone: {
-          type: 'string',
-          description: 'Phone number',
-        },
-        note: {
-          type: 'string',
-          description: 'Customer note',
-        },
-        tags: {
-          type: 'string',
-          description: 'Comma-separated tags',
-        },
-        accepts_marketing: {
-          type: 'boolean',
-          description: 'Accepts marketing',
-        },
+        email: { type: 'string', description: 'Customer email' },
+        first_name: { type: 'string', description: 'First name' },
+        last_name: { type: 'string', description: 'Last name' },
+        phone: { type: 'string', description: 'Phone number' },
+        note: { type: 'string', description: 'Customer note' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
+        accepts_marketing: { type: 'boolean', description: 'Accepts marketing' },
       },
       required: ['customer_id'],
     },
@@ -1777,10 +920,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        customer_id: {
-          type: 'string',
-          description: 'The customer ID',
-        },
+        customer_id: { type: 'string', description: 'The customer ID' },
       },
       required: ['customer_id'],
     },
@@ -1791,18 +931,9 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        customer_id: {
-          type: 'string',
-          description: 'The customer ID',
-        },
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
-        status: {
-          type: 'string',
-          description: 'Order status',
-        },
+        customer_id: { type: 'string', description: 'The customer ID' },
+        limit: { type: 'number', description: 'Max results' },
+        status: { type: 'string', description: 'Order status' },
       },
       required: ['customer_id'],
     },
@@ -1810,10 +941,7 @@ const tools = [
   {
     name: 'list_locations',
     description: 'List all fulfillment locations for the store',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'get_inventory_levels',
@@ -1821,10 +949,6 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
         location_ids: {
           type: 'string',
           description: 'Comma-separated location IDs',
@@ -1833,6 +957,7 @@ const tools = [
           type: 'string',
           description: 'Comma-separated inventory item IDs',
         },
+        limit: { type: 'number', description: 'Max results' },
       },
     },
   },
@@ -1842,14 +967,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        location_id: {
-          type: 'string',
-          description: 'Location ID',
-        },
-        inventory_item_id: {
-          type: 'string',
-          description: 'Inventory item ID',
-        },
+        location_id: { type: 'string', description: 'Location ID' },
+        inventory_item_id: { type: 'string', description: 'Inventory item ID' },
         available_adjustment: {
           type: 'number',
           description: 'Positive to add, negative to subtract',
@@ -1864,14 +983,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        location_id: {
-          type: 'string',
-          description: 'Location ID',
-        },
-        inventory_item_id: {
-          type: 'string',
-          description: 'Inventory item ID',
-        },
+        location_id: { type: 'string', description: 'Location ID' },
+        inventory_item_id: { type: 'string', description: 'Inventory item ID' },
         available: {
           type: 'number',
           description: 'Absolute quantity to set',
@@ -1886,10 +999,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
+        limit: { type: 'number', description: 'Max results' },
       },
     },
   },
@@ -1899,14 +1009,11 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: {
-          type: 'string',
-          description: 'Price rule title',
-        },
+        title: { type: 'string', description: 'Price rule title' },
         value_type: {
           type: 'string',
-          enum: ['fixed_amount', 'percentage'],
           description: 'Discount type',
+          enum: ['fixed_amount', 'percentage'],
         },
         value: {
           type: 'string',
@@ -1914,32 +1021,26 @@ const tools = [
         },
         customer_selection: {
           type: 'string',
-          enum: ['all', 'prerequisite'],
           description: 'Customer selection type',
+          enum: ['all', 'prerequisite'],
         },
         target_type: {
           type: 'string',
-          enum: ['line_item', 'shipping_line'],
           description: 'Target type',
+          enum: ['line_item', 'shipping_line'],
         },
         target_selection: {
           type: 'string',
-          enum: ['all', 'entitled'],
           description: 'Target selection',
+          enum: ['all', 'entitled'],
         },
         allocation_method: {
           type: 'string',
-          enum: ['each', 'across'],
           description: 'How discount is applied',
+          enum: ['each', 'across'],
         },
-        starts_at: {
-          type: 'string',
-          description: 'ISO 8601 datetime',
-        },
-        ends_at: {
-          type: 'string',
-          description: 'ISO 8601 datetime (optional)',
-        },
+        starts_at: { type: 'string', description: 'ISO 8601 datetime' },
+        ends_at: { type: 'string', description: 'ISO 8601 datetime (optional)' },
         usage_limit: {
           type: 'number',
           description: 'Total uses allowed (optional)',
@@ -1953,7 +1054,16 @@ const tools = [
           description: 'Minimum order amount required',
         },
       },
-      required: ['title', 'value_type', 'value', 'customer_selection', 'target_type', 'target_selection', 'allocation_method', 'starts_at'],
+      required: [
+        'title',
+        'value_type',
+        'value',
+        'customer_selection',
+        'target_type',
+        'target_selection',
+        'allocation_method',
+        'starts_at',
+      ],
     },
   },
   {
@@ -1962,10 +1072,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        price_rule_id: {
-          type: 'string',
-          description: 'Price rule ID',
-        },
+        price_rule_id: { type: 'string', description: 'Price rule ID' },
         code: {
           type: 'string',
           description: 'Discount code string (e.g. SAVE20)',
@@ -1980,10 +1087,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        price_rule_id: {
-          type: 'string',
-          description: 'Price rule ID',
-        },
+        price_rule_id: { type: 'string', description: 'Price rule ID' },
       },
       required: ['price_rule_id'],
     },
@@ -1994,14 +1098,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        price_rule_id: {
-          type: 'string',
-          description: 'Price rule ID',
-        },
-        discount_code_id: {
-          type: 'string',
-          description: 'Discount code ID',
-        },
+        price_rule_id: { type: 'string', description: 'Price rule ID' },
+        discount_code_id: { type: 'string', description: 'Discount code ID' },
       },
       required: ['price_rule_id', 'discount_code_id'],
     },
@@ -2012,10 +1110,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
+        limit: { type: 'number', description: 'Max results' },
       },
     },
   },
@@ -2025,18 +1120,12 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: {
-          type: 'string',
-          description: 'Display name (required)',
-        },
+        name: { type: 'string', description: 'Display name (required)' },
         type: {
           type: 'string',
           description: 'Type handle (required)',
         },
-        description: {
-          type: 'string',
-          description: 'Description',
-        },
+        description: { type: 'string', description: 'Description' },
         fields: {
           type: 'array',
           description: 'Field definitions',
@@ -2045,9 +1134,9 @@ const tools = [
             properties: {
               name: { type: 'string' },
               key: { type: 'string' },
+              description: { type: 'string' },
               type: { type: 'string' },
               required: { type: 'boolean' },
-              description: { type: 'string' },
             },
           },
         },
@@ -2061,14 +1150,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        type: {
-          type: 'string',
-          description: 'Metaobject type handle',
-        },
-        limit: {
-          type: 'number',
-          description: 'Max results',
-        },
+        type: { type: 'string', description: 'Metaobject type handle' },
+        limit: { type: 'number', description: 'Max results' },
       },
       required: ['type'],
     },
@@ -2079,14 +1162,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        type: {
-          type: 'string',
-          description: 'Metaobject type handle',
-        },
-        handle: {
-          type: 'string',
-          description: 'Optional unique handle/slug',
-        },
+        type: { type: 'string', description: 'Metaobject type handle' },
         fields: {
           type: 'array',
           description: 'Field values',
@@ -2098,6 +1174,7 @@ const tools = [
             },
           },
         },
+        handle: { type: 'string', description: 'Optional unique handle/slug' },
         capabilities: {
           type: 'object',
           description: 'Capabilities like publishable status',
@@ -2105,7 +1182,10 @@ const tools = [
             publishable: {
               type: 'object',
               properties: {
-                status: { type: 'string', enum: ['ACTIVE', 'DRAFT'] },
+                status: {
+                  type: 'string',
+                  enum: ['ACTIVE', 'DRAFT'],
+                },
               },
             },
           },
@@ -2171,14 +1251,11 @@ const tools = [
   },
   {
     name: 'publish_product_to_channel',
-    description: 'Publish a product to one or more sales channels. Published one channel at a time to avoid race conditions.',
+    description: 'Publish a product to one or more sales channels',
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
         publication_ids: {
           type: 'string',
           description: 'Comma-separated publication IDs',
@@ -2193,14 +1270,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: {
-          type: 'string',
-          description: 'The product ID',
-        },
-        publication_id: {
-          type: 'string',
-          description: 'The publication ID',
-        },
+        product_id: { type: 'string', description: 'The product ID' },
+        publication_id: { type: 'string', description: 'The publication ID' },
       },
       required: ['product_id', 'publication_id'],
     },
@@ -2215,459 +1286,1257 @@ const tools = [
   },
 ];
 
-// ─── Tool Handlers ────────────────────────────────────────────────────────
-async function handleToolCall(toolName, toolInput) {
-  try {
-    switch (toolName) {
-      // Product operations
-      case 'get_product': {
-        const product = await getProduct(toolInput.product_id);
-        return { success: true, data: product };
-      }
-
-      case 'list_products': {
-        const result = await listProducts(toolInput);
-        return { success: true, data: result.products };
-      }
-
-      case 'create_product': {
-        const result = await createProduct(toolInput);
-        return { success: true, data: result.product };
-      }
-
-      case 'update_product': {
-        const { product_id, ...product } = toolInput;
-        const result = await updateProduct(product_id, product);
-        return { success: true, data: result.product };
-      }
-
-      case 'delete_product': {
-        await deleteProduct(toolInput.product_id);
-        return { success: true, message: 'Product deleted' };
-      }
-
-      case 'publish_product': {
-        const product = {
-          status: toolInput.published ? 'active' : 'draft',
-        };
-        const result = await updateProduct(toolInput.product_id, product);
-        return { success: true, data: result.product };
-      }
-
-      // Variant operations
-      case 'list_product_variants': {
-        const result = await listProducts({ id: toolInput.product_id });
-        const product = result.products[0];
-        return {
-          success: true,
-          data: product ? product.variants : [],
-        };
-      }
-
-      case 'create_product_variant': {
-        const result = await createProductVariant(
-          toolInput.product_id,
-          toolInput
-        );
-        return { success: true, data: result.variant };
-      }
-
-      case 'update_product_variant': {
-        const result = await updateProductVariant(
-          toolInput.variant_id,
-          toolInput
-        );
-        return { success: true, data: result.variant };
-      }
-
-      case 'delete_product_variant': {
-        await deleteProductVariant(
-          toolInput.product_id,
-          toolInput.variant_id
-        );
-        return { success: true, message: 'Variant deleted' };
-      }
-
-      // Product Image operations
-      case 'add_product_image': {
-        const imageData = {
-          src: toolInput.src,
-        };
-        if (toolInput.alt) imageData.alt = toolInput.alt;
-        const result = await shopifyREST(
-          `/products/${toolInput.product_id}/images.json`,
-          {
-            method: 'POST',
-            body: JSON.stringify({ image: imageData }),
-          }
-        );
-        return { success: true, data: result.image };
-      }
-
-      // Collection operations
-      case 'list_collections': {
-        const result = await listCollections(toolInput);
-        return { success: true, data: result };
-      }
-
-      case 'get_collection': {
-        const result = await getCollection(toolInput.collection_id);
-        return { success: true, data: result.collection };
-      }
-
-      case 'create_collection': {
-        const result = await createCollection(toolInput);
-        return { success: true, data: result.custom_collection };
-      }
-
-      case 'update_collection': {
-        const { collection_id, ...collection } = toolInput;
-        const result = await updateCollection(collection_id, collection);
-        return { success: true, data: result.custom_collection };
-      }
-
-      case 'add_product_to_collection': {
-        const result = await addProductToCollection(
-          toolInput.collection_id,
-          toolInput.product_id
-        );
-        return { success: true, data: result.collect };
-      }
-
-      case 'list_collection_products': {
-        const products = await listProducts({
-          collection_id: toolInput.collection_id,
-          limit: toolInput.limit,
-        });
-        return { success: true, data: products.products };
-      }
-
-      // Metafield operations
-      case 'get_product_metafields': {
-        const result = await getProductMetafields(
-          toolInput.product_id,
-          { namespace: toolInput.namespace }
-        );
-        return { success: true, data: result.metafields };
-      }
-
-      case 'set_product_metafield': {
-        const result = await setProductMetafield(toolInput.product_id, {
-          namespace: toolInput.namespace,
-          key: toolInput.key,
-          type: toolInput.type,
-          value: toolInput.value,
-        });
-        return { success: true, data: result.metafield };
-      }
-
-      // Order operations
-      case 'list_orders': {
-        const result = await listOrders(toolInput);
-        return { success: true, data: result.orders };
-      }
-
-      case 'get_order': {
-        const result = await getOrder(toolInput.order_id);
-        return { success: true, data: result.order };
-      }
-
-      case 'create_order': {
-        const result = await createOrder(toolInput);
-        return { success: true, data: result.order };
-      }
-
-      case 'update_order': {
-        const { order_id, ...order } = toolInput;
-        const result = await updateOrder(order_id, order);
-        return { success: true, data: result.order };
-      }
-
-      case 'cancel_order': {
-        const { order_id, reason, email, refund, restock } = toolInput;
-        const result = await cancelOrder(order_id, {
-          reason,
-          email,
-          refund,
-          restock,
-        });
-        return { success: true, data: result.order };
-      }
-
-      case 'close_order': {
-        const result = await closeOrder(toolInput.order_id);
-        return { success: true, data: result.order };
-      }
-
-      case 'fulfill_order': {
-        const { order_id, ...fulfillment } = toolInput;
-        const result = await fulfillOrder(order_id, fulfillment);
-        return { success: true, data: result.fulfillment };
-      }
-
-      case 'create_refund': {
-        const { order_id, ...refund } = toolInput;
-        const result = await createRefund(order_id, refund);
-        return { success: true, data: result.refund };
-      }
-
-      case 'get_order_transactions': {
-        const result = await shopifyREST(
-          `/orders/${toolInput.order_id}/transactions.json`
-        );
-        return { success: true, data: result.transactions };
-      }
-
-      // Draft order operations
-      case 'list_draft_orders': {
-        const params = new URLSearchParams(toolInput);
-        const result = await shopifyREST(`/draft_orders.json?${params}`);
-        return { success: true, data: result.draft_orders };
-      }
-
-      case 'create_draft_order': {
-        const result = await createDraftOrder(toolInput);
-        return { success: true, data: result.draft_order };
-      }
-
-      case 'complete_draft_order': {
-        const result = await completeDraftOrder(
-          toolInput.draft_order_id,
-          toolInput.payment_gateway
-        );
-        return { success: true, data: result.draft_order };
-      }
-
-      // Customer operations
-      case 'list_customers': {
-        const result = await listCustomers(toolInput);
-        return { success: true, data: result.customers };
-      }
-
-      case 'search_customers': {
-        const result = await searchCustomers(toolInput.query);
-        return { success: true, data: result.customers };
-      }
-
-      case 'get_customer': {
-        const result = await getCustomer(toolInput.customer_id);
-        return { success: true, data: result.customer };
-      }
-
-      case 'create_customer': {
-        const result = await createCustomer(toolInput);
-        return { success: true, data: result.customer };
-      }
-
-      case 'update_customer': {
-        const { customer_id, ...customer } = toolInput;
-        const result = await updateCustomer(customer_id, customer);
-        return { success: true, data: result.customer };
-      }
-
-      case 'delete_customer': {
-        await deleteCustomer(toolInput.customer_id);
-        return { success: true, message: 'Customer deleted' };
-      }
-
-      case 'get_customer_orders': {
-        const result = await getCustomerOrders(
-          toolInput.customer_id,
-          toolInput.limit
-        );
-        return { success: true, data: result.orders };
-      }
-
-      // Location & Inventory operations
-      case 'list_locations': {
-        const result = await getLocations();
-        return { success: true, data: result.locations };
-      }
-
-      case 'get_inventory_levels': {
-        const result = await getInventoryLevels(toolInput);
-        return { success: true, data: result.inventory_levels };
-      }
-
-      case 'adjust_inventory': {
-        const result = await adjustInventory(
-          toolInput.inventory_item_id,
-          toolInput.location_id,
-          toolInput.available_adjustment
-        );
-        return { success: true, data: result.inventory_level };
-      }
-
-      case 'set_inventory_level': {
-        const result = await shopifyREST(
-          '/inventory_levels/set.json',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              inventory_item_id: toolInput.inventory_item_id,
-              location_id: toolInput.location_id,
-              available: toolInput.available,
-            }),
-          }
-        );
-        return { success: true, data: result.inventory_level };
-      }
-
-      // Price Rule & Discount operations
-      case 'list_price_rules': {
-        const result = await listPriceRules(toolInput);
-        return { success: true, data: result.price_rules };
-      }
-
-      case 'create_price_rule': {
-        const result = await createPriceRule(toolInput);
-        return { success: true, data: result.price_rule };
-      }
-
-      case 'create_discount_code': {
-        const result = await createDiscountCode(
-          toolInput.price_rule_id,
-          { code: toolInput.code }
-        );
-        return { success: true, data: result.discount_code };
-      }
-
-      case 'list_discount_codes': {
-        const params = new URLSearchParams(toolInput);
-        const result = await shopifyREST(
-          `/price_rules/${toolInput.price_rule_id}/discount_codes.json?${params}`
-        );
-        return { success: true, data: result.discount_codes };
-      }
-
-      case 'delete_discount_code': {
-        await deleteDiscountCode(
-          toolInput.price_rule_id,
-          toolInput.discount_code_id
-        );
-        return { success: true, message: 'Discount code deleted' };
-      }
-
-      // Metaobject operations
-      case 'list_metaobject_definitions': {
-        const definitions = await listMetaobjectDefinitions();
-        return { success: true, data: definitions };
-      }
-
-      case 'create_metaobject_definition': {
-        const definition = await createMetaobjectDefinition(toolInput);
-        return { success: true, data: definition };
-      }
-
-      case 'list_metaobjects': {
-        const metaobjects = await listMetaobjects(
-          toolInput.type,
-          { limit: toolInput.limit }
-        );
-        return { success: true, data: metaobjects };
-      }
-
-      case 'create_metaobject': {
-        const metaobject = await createMetaobject(
-          toolInput.type,
-          toolInput.fields,
-          toolInput.handle
-        );
-        return { success: true, data: metaobject };
-      }
-
-      case 'update_metaobject': {
-        const metaobject = await updateMetaobject(
-          toolInput.id,
-          toolInput.fields
-        );
-        return { success: true, data: metaobject };
-      }
-
-      case 'delete_metaobject': {
-        const result = await deleteMetaobject(toolInput.id);
-        return { success: true, data: result };
-      }
-
-      // Product Taxonomy & Publication operations
-      case 'list_product_taxonomy': {
-        const taxonomy = await listProductTaxonomy();
-        return { success: true, data: taxonomy };
-      }
-
-      case 'list_publications': {
-        const publications = await listPublications();
-        return { success: true, data: publications };
-      }
-
-      case 'publish_product_to_channel': {
-        const publicationIds = toolInput.publication_ids.split(',');
-        const results = await publishProductToPublications(
-          toolInput.product_id,
-          publicationIds
-        );
-        return { success: true, data: results };
-      }
-
-      case 'unpublish_product_from_channel': {
-        const result = await unpublishProductFromPublication(
-          toolInput.product_id,
-          toolInput.publication_id
-        );
-        return { success: true, data: result };
-      }
-
-      // Shop info
-      case 'get_shop_info': {
-        const shop = await getShop();
-        return { success: true, data: shop };
-      }
-
-      default:
-        return { success: false, error: `Unknown tool: ${toolName}` };
+// ─── Tool Handlers ────────────────────────────────────────────────────────────
+const handlers = {
+  get_product: async (args) => {
+    try {
+      const product = await shopifyREST(`/products/${args.product_id}.json`);
+      return ok(product);
+    } catch (error) {
+      return err(error.message);
     }
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message || String(error),
-    };
-  }
-}
+  },
 
-// ─── MCP Server Setup ─────────────────────────────────────────────────────
+  list_products: async (args) => {
+    try {
+      let url = '/products.json?';
+      const params = [];
+      if (args.limit) params.push(`limit=${args.limit}`);
+      if (args.title) params.push(`title=${encodeURIComponent(args.title)}`);
+      if (args.product_type)
+        params.push(`product_type=${encodeURIComponent(args.product_type)}`);
+      if (args.vendor) params.push(`vendor=${encodeURIComponent(args.vendor)}`);
+      if (args.status) params.push(`status=${args.status}`);
+      if (args.collection_id)
+        params.push(`collection_id=${args.collection_id}`);
+      url += params.join('&');
+      const data = await shopifyREST(url);
+      return ok(data.products || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_product: async (args) => {
+    try {
+      const product = {
+        title: args.title,
+        body_html: args.body_html,
+        vendor: args.vendor,
+        product_type: args.product_type,
+        tags: args.tags,
+        status: args.status,
+        variants: args.variants,
+        options: args.options,
+        images: args.images,
+        metafields: args.metafields,
+      };
+
+      const result = await shopifyREST('/products.json', {
+        method: 'POST',
+        body: JSON.stringify({ product }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_product: async (args) => {
+    try {
+      const product = {};
+      if (args.title) product.title = args.title;
+      if (args.body_html) product.body_html = args.body_html;
+      if (args.vendor) product.vendor = args.vendor;
+      if (args.product_type) product.product_type = args.product_type;
+      if (args.tags) product.tags = args.tags;
+      if (args.status) product.status = args.status;
+      if (args.product_taxonomy_node_id)
+        product.product_taxonomy_node_id = args.product_taxonomy_node_id;
+
+      const result = await shopifyREST(
+        `/products/${args.product_id}.json`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ product }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  set_product_category: async (args) => {
+    try {
+      // Extract numeric ID from product_id if it contains slashes (GID format)
+      let numericId = args.product_id;
+      if (args.product_id.includes('/')) {
+        const parts = args.product_id.split('/');
+        numericId = parts[parts.length - 1];
+      }
+
+      const mutation = `
+        mutation SetProductCategory($input: ProductInput!) {
+          productUpdate(input: $input) {
+            product {
+              id
+              title
+              productType
+              taxonomyNode {
+                id
+                name
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          id: `gid://shopify/Product/${numericId}`,
+          productTaxonomyNodeId: args.taxonomy_node_id,
+        },
+      };
+
+      const result = await shopifyGQL(mutation, variables);
+      if (result.productUpdate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.productUpdate.userErrors)}`
+        );
+      }
+      return ok(result.productUpdate.product);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_product: async (args) => {
+    try {
+      await shopifyREST(`/products/${args.product_id}.json`, {
+        method: 'DELETE',
+      });
+      return ok({ message: 'Product deleted' });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  publish_product: async (args) => {
+    try {
+      const status = args.published ? 'active' : 'draft';
+      const result = await shopifyREST(
+        `/products/${args.product_id}.json`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ product: { status } }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_product_variants: async (args) => {
+    try {
+      const data = await shopifyREST(
+        `/products/${args.product_id}/variants.json${args.limit ? `?limit=${args.limit}` : ''}`
+      );
+      return ok(data.variants || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_product_variant: async (args) => {
+    try {
+      const variant = {
+        price: args.price,
+        title: args.title,
+        sku: args.sku,
+        barcode: args.barcode,
+        compare_at_price: args.compare_at_price,
+        inventory_quantity: args.inventory_quantity,
+        taxable: args.taxable,
+        requires_shipping: args.requires_shipping,
+        weight: args.weight,
+        weight_unit: args.weight_unit,
+        option1: args.option1,
+        option2: args.option2,
+        option3: args.option3,
+      };
+
+      const result = await shopifyREST(
+        `/products/${args.product_id}/variants.json`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ variant }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_product_variant: async (args) => {
+    try {
+      const variant = {};
+      if (args.price) variant.price = args.price;
+      if (args.title) variant.title = args.title;
+      if (args.sku) variant.sku = args.sku;
+      if (args.barcode) variant.barcode = args.barcode;
+      if (args.compare_at_price) variant.compare_at_price = args.compare_at_price;
+      if (args.taxable !== undefined) variant.taxable = args.taxable;
+      if (args.requires_shipping !== undefined)
+        variant.requires_shipping = args.requires_shipping;
+      if (args.weight) variant.weight = args.weight;
+      if (args.weight_unit) variant.weight_unit = args.weight_unit;
+      if (args.option1) variant.option1 = args.option1;
+      if (args.option2) variant.option2 = args.option2;
+      if (args.option3) variant.option3 = args.option3;
+
+      const result = await shopifyREST(`/variants/${args.variant_id}.json`, {
+        method: 'PUT',
+        body: JSON.stringify({ variant }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_product_variant: async (args) => {
+    try {
+      await shopifyREST(
+        `/products/${args.product_id}/variants/${args.variant_id}.json`,
+        { method: 'DELETE' }
+      );
+      return ok({ message: 'Variant deleted' });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_product_metafields: async (args) => {
+    try {
+      let url = `/products/${args.product_id}/metafields.json`;
+      if (args.namespace) url += `?namespace=${encodeURIComponent(args.namespace)}`;
+      const data = await shopifyREST(url);
+      return ok(data.metafields || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  set_product_metafield: async (args) => {
+    try {
+      const metafield = {
+        namespace: args.namespace,
+        key: args.key,
+        value: args.value,
+        type: args.type,
+      };
+      const result = await shopifyREST(
+        `/products/${args.product_id}/metafields.json`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ metafield }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  add_product_image: async (args) => {
+    try {
+      const image = { src: args.src, alt: args.alt };
+      if (args.variant_ids) image.variant_ids = args.variant_ids;
+
+      const result = await shopifyREST(
+        `/products/${args.product_id}/images.json`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ image }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_collections: async (args) => {
+    try {
+      let url = '/custom_collections.json?';
+      const params = [];
+      if (args.limit) params.push(`limit=${args.limit}`);
+      if (args.title) params.push(`title=${encodeURIComponent(args.title)}`);
+      url += params.join('&');
+      const data = await shopifyREST(url);
+      return ok(data.custom_collections || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_collection: async (args) => {
+    try {
+      const data = await shopifyREST(`/custom_collections/${args.collection_id}.json`);
+      return ok(data.custom_collection);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_collection: async (args) => {
+    try {
+      const custom_collection = {
+        title: args.title,
+        body_html: args.body_html,
+        image: args.image_src ? { src: args.image_src } : undefined,
+        sort_order: args.sort_order,
+        published: args.published,
+      };
+      const result = await shopifyREST('/custom_collections.json', {
+        method: 'POST',
+        body: JSON.stringify({ custom_collection }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_collection: async (args) => {
+    try {
+      const custom_collection = {};
+      if (args.title) custom_collection.title = args.title;
+      if (args.body_html) custom_collection.body_html = args.body_html;
+      if (args.sort_order) custom_collection.sort_order = args.sort_order;
+      if (args.published !== undefined) custom_collection.published = args.published;
+
+      const result = await shopifyREST(
+        `/custom_collections/${args.collection_id}.json`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ custom_collection }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  add_product_to_collection: async (args) => {
+    try {
+      const result = await shopifyREST(
+        `/custom_collections/${args.collection_id}/products/${args.product_id}.json`,
+        { method: 'PUT', body: JSON.stringify({}) }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_collection_products: async (args) => {
+    try {
+      const data = await shopifyREST(
+        `/custom_collections/${args.collection_id}/products.json${args.limit ? `?limit=${args.limit}` : ''}`
+      );
+      return ok(data.products || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_orders: async (args) => {
+    try {
+      let url = '/orders.json?';
+      const params = [];
+      if (args.status) params.push(`status=${args.status}`);
+      if (args.financial_status) params.push(`financial_status=${args.financial_status}`);
+      if (args.fulfillment_status)
+        params.push(`fulfillment_status=${args.fulfillment_status}`);
+      if (args.customer_id) params.push(`customer_id=${args.customer_id}`);
+      if (args.created_at_min) params.push(`created_at_min=${args.created_at_min}`);
+      if (args.created_at_max) params.push(`created_at_max=${args.created_at_max}`);
+      if (args.limit) params.push(`limit=${args.limit}`);
+      url += params.join('&');
+      const data = await shopifyREST(url);
+      return ok(data.orders || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_order: async (args) => {
+    try {
+      const data = await shopifyREST(`/orders/${args.order_id}.json`);
+      return ok(data.order);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_order: async (args) => {
+    try {
+      const order = {
+        line_items: args.line_items,
+        customer: args.customer,
+        shipping_address: args.shipping_address,
+        note: args.note,
+        tags: args.tags,
+        financial_status: args.financial_status,
+        send_receipt: args.send_receipt,
+      };
+      const result = await shopifyREST('/orders.json', {
+        method: 'POST',
+        body: JSON.stringify({ order }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_order: async (args) => {
+    try {
+      const order = {};
+      if (args.email) order.email = args.email;
+      if (args.note) order.note = args.note;
+      if (args.tags) order.tags = args.tags;
+      if (args.shipping_address) order.shipping_address = args.shipping_address;
+
+      const result = await shopifyREST(`/orders/${args.order_id}.json`, {
+        method: 'PUT',
+        body: JSON.stringify({ order }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  cancel_order: async (args) => {
+    try {
+      let url = `/orders/${args.order_id}/cancel.json`;
+      const params = [];
+      if (args.reason) params.push(`reason=${args.reason}`);
+      if (args.refund !== undefined) params.push(`refund=${args.refund}`);
+      if (args.restock !== undefined) params.push(`restock=${args.restock}`);
+      if (args.email !== undefined) params.push(`email=${args.email}`);
+      if (params.length) url += '?' + params.join('&');
+
+      const result = await shopifyREST(url, { method: 'POST', body: '{}' });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  close_order: async (args) => {
+    try {
+      const result = await shopifyREST(`/orders/${args.order_id}/close.json`, {
+        method: 'POST',
+        body: '{}',
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  fulfill_order: async (args) => {
+    try {
+      const fulfillment = {
+        line_items_by_fulfillment_order: [
+          {
+            fulfillment_order_line_items: args.line_items || [],
+          },
+        ],
+        tracking_info:
+          args.tracking_company || args.tracking_number
+            ? {
+                number: args.tracking_number,
+                company: args.tracking_company,
+                url: args.tracking_url,
+              }
+            : undefined,
+        notify_customer: args.notify_customer,
+      };
+
+      const result = await shopifyREST(
+        `/orders/${args.order_id}/fulfillments.json`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ fulfillment }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_refund: async (args) => {
+    try {
+      const refund = {
+        refund_line_items: args.refund_line_items,
+        shipping: args.shipping,
+        transactions: args.transactions,
+        note: args.note,
+        notify: args.notify,
+      };
+      const result = await shopifyREST(`/orders/${args.order_id}/refunds.json`, {
+        method: 'POST',
+        body: JSON.stringify({ refund }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_order_transactions: async (args) => {
+    try {
+      const data = await shopifyREST(
+        `/orders/${args.order_id}/transactions.json`
+      );
+      return ok(data.transactions || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_draft_orders: async (args) => {
+    try {
+      let url = '/draft_orders.json?';
+      const params = [];
+      if (args.status) params.push(`status=${args.status}`);
+      if (args.limit) params.push(`limit=${args.limit}`);
+      url += params.join('&');
+      const data = await shopifyREST(url);
+      return ok(data.draft_orders || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_draft_order: async (args) => {
+    try {
+      const draft_order = {
+        line_items: args.line_items,
+        customer: args.customer,
+        shipping_address: args.shipping_address,
+        discount: args.discount,
+        note: args.note,
+        tags: args.tags,
+      };
+      const result = await shopifyREST('/draft_orders.json', {
+        method: 'POST',
+        body: JSON.stringify({ draft_order }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  complete_draft_order: async (args) => {
+    try {
+      let url = `/draft_orders/${args.draft_order_id}/complete.json`;
+      if (args.payment_gateway) url += `?payment_gateway=${args.payment_gateway}`;
+      const result = await shopifyREST(url, {
+        method: 'PUT',
+        body: JSON.stringify({}),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_customers: async (args) => {
+    try {
+      let url = '/customers.json?';
+      const params = [];
+      if (args.limit) params.push(`limit=${args.limit}`);
+      if (args.created_at_min) params.push(`created_at_min=${args.created_at_min}`);
+      if (args.created_at_max) params.push(`created_at_max=${args.created_at_max}`);
+      if (args.updated_at_min) params.push(`updated_at_min=${args.updated_at_min}`);
+      url += params.join('&');
+      const data = await shopifyREST(url);
+      return ok(data.customers || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  search_customers: async (args) => {
+    try {
+      const url = `/customers/search.json?query=${encodeURIComponent(args.query)}${args.limit ? `&limit=${args.limit}` : ''}`;
+      const data = await shopifyREST(url);
+      return ok(data.customers || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_customer: async (args) => {
+    try {
+      const data = await shopifyREST(`/customers/${args.customer_id}.json`);
+      return ok(data.customer);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_customer: async (args) => {
+    try {
+      const customer = {
+        email: args.email,
+        first_name: args.first_name,
+        last_name: args.last_name,
+        phone: args.phone,
+        note: args.note,
+        tags: args.tags,
+        accepts_marketing: args.accepts_marketing,
+        verified_email: args.verified_email,
+        addresses: args.addresses,
+      };
+      const result = await shopifyREST('/customers.json', {
+        method: 'POST',
+        body: JSON.stringify({ customer }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_customer: async (args) => {
+    try {
+      const customer = {};
+      if (args.email) customer.email = args.email;
+      if (args.first_name) customer.first_name = args.first_name;
+      if (args.last_name) customer.last_name = args.last_name;
+      if (args.phone) customer.phone = args.phone;
+      if (args.note) customer.note = args.note;
+      if (args.tags) customer.tags = args.tags;
+      if (args.accepts_marketing !== undefined)
+        customer.accepts_marketing = args.accepts_marketing;
+
+      const result = await shopifyREST(`/customers/${args.customer_id}.json`, {
+        method: 'PUT',
+        body: JSON.stringify({ customer }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_customer: async (args) => {
+    try {
+      await shopifyREST(`/customers/${args.customer_id}.json`, {
+        method: 'DELETE',
+      });
+      return ok({ message: 'Customer deleted' });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_customer_orders: async (args) => {
+    try {
+      let url = `/customers/${args.customer_id}/orders.json`;
+      const params = [];
+      if (args.limit) params.push(`limit=${args.limit}`);
+      if (args.status) params.push(`status=${args.status}`);
+      if (params.length) url += '?' + params.join('&');
+      const data = await shopifyREST(url);
+      return ok(data.orders || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_locations: async (args) => {
+    try {
+      const data = await shopifyREST('/locations.json');
+      return ok(data.locations || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_inventory_levels: async (args) => {
+    try {
+      let url = '/inventory_levels.json?';
+      const params = [];
+      if (args.location_ids) params.push(`location_ids=${args.location_ids}`);
+      if (args.inventory_item_ids)
+        params.push(`inventory_item_ids=${args.inventory_item_ids}`);
+      if (args.limit) params.push(`limit=${args.limit}`);
+      url += params.join('&');
+      const data = await shopifyREST(url);
+      return ok(data.inventory_levels || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  adjust_inventory: async (args) => {
+    try {
+      const result = await shopifyREST(
+        `/inventory_levels/adjust.json`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            location_id: args.location_id,
+            inventory_item_id: args.inventory_item_id,
+            available_adjustment: args.available_adjustment,
+          }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  set_inventory_level: async (args) => {
+    try {
+      const result = await shopifyREST(
+        `/inventory_levels/set.json`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            location_id: args.location_id,
+            inventory_item_id: args.inventory_item_id,
+            available: args.available,
+            disconnect_if_necessary: true,
+          }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_price_rules: async (args) => {
+    try {
+      let url = '/price_rules.json';
+      if (args.limit) url += `?limit=${args.limit}`;
+      const data = await shopifyREST(url);
+      return ok(data.price_rules || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_price_rule: async (args) => {
+    try {
+      const price_rule = {
+        title: args.title,
+        value_type: args.value_type,
+        value: args.value,
+        customer_selection: args.customer_selection,
+        target_type: args.target_type,
+        target_selection: args.target_selection,
+        allocation_method: args.allocation_method,
+        starts_at: args.starts_at,
+        ends_at: args.ends_at,
+        usage_limit: args.usage_limit,
+        once_per_customer: args.once_per_customer,
+        minimum_amount: args.minimum_amount,
+      };
+      const result = await shopifyREST('/price_rules.json', {
+        method: 'POST',
+        body: JSON.stringify({ price_rule }),
+      });
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_discount_code: async (args) => {
+    try {
+      const discount_code = {
+        price_rule_id: args.price_rule_id,
+        code: args.code,
+      };
+      const result = await shopifyREST(
+        `/price_rules/${args.price_rule_id}/discount_codes.json`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ discount_code }),
+        }
+      );
+      return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_discount_codes: async (args) => {
+    try {
+      const data = await shopifyREST(
+        `/price_rules/${args.price_rule_id}/discount_codes.json`
+      );
+      return ok(data.discount_codes || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_discount_code: async (args) => {
+    try {
+      await shopifyREST(
+        `/price_rules/${args.price_rule_id}/discount_codes/${args.discount_code_id}.json`,
+        { method: 'DELETE' }
+      );
+      return ok({ message: 'Discount code deleted' });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_metaobject_definitions: async (args) => {
+    try {
+      const query = `
+        query {
+          metaobjectDefinitions(first: ${args.limit || 10}) {
+            edges {
+              node {
+                id
+                name
+                type
+                description
+                fields(first: 25) {
+                  edges {
+                    node {
+                      name
+                      key
+                      description
+                      type
+                      required
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query);
+      return ok(
+        result.metaobjectDefinitions.edges.map((e) => e.node) || []
+      );
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_metaobject_definition: async (args) => {
+    try {
+      const mutation = `
+        mutation CreateMetaobjectDefinition($definition: MetaobjectDefinitionInput!) {
+          metaobjectDefinitionCreate(definition: $definition) {
+            metaobjectDefinition {
+              id
+              name
+              type
+              description
+              fields(first: 25) {
+                edges {
+                  node {
+                    name
+                    key
+                    description
+                    type
+                    required
+                  }
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const variables = {
+        definition: {
+          name: args.name,
+          type: args.type,
+          description: args.description,
+          fields: args.fields,
+        },
+      };
+      const result = await shopifyGQL(mutation, variables);
+      if (result.metaobjectDefinitionCreate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metaobjectDefinitionCreate.userErrors)}`
+        );
+      }
+      return ok(result.metaobjectDefinitionCreate.metaobjectDefinition);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_metaobjects: async (args) => {
+    try {
+      const query = `
+        query MetaobjectsByType($type: String!) {
+          metaobjects(type: $type, first: ${args.limit || 10}) {
+            edges {
+              node {
+                id
+                type
+                handle
+                fields {
+                  key
+                  value
+                }
+              }
+            }
+          }
+        }
+      `;
+      const variables = { type: args.type };
+      const result = await shopifyGQL(query, variables);
+      return ok(result.metaobjects.edges.map((e) => e.node) || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_metaobject: async (args) => {
+    try {
+      const mutation = `
+        mutation CreateMetaobject($input: MetaobjectInput!) {
+          metaobjectCreate(input: $input) {
+            metaobject {
+              id
+              type
+              handle
+              displayName
+              fields {
+                key
+                value
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const variables = {
+        input: {
+          type: args.type,
+          fields: args.fields,
+          handle: args.handle,
+          capabilities: args.capabilities,
+        },
+      };
+      const result = await shopifyGQL(mutation, variables);
+      if (result.metaobjectCreate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metaobjectCreate.userErrors)}`
+        );
+      }
+      return ok(result.metaobjectCreate.metaobject);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_metaobject: async (args) => {
+    try {
+      const mutation = `
+        mutation UpdateMetaobject($id: ID!, $metaobject: MetaobjectInput!) {
+          metaobjectUpdate(id: $id, metaobject: $metaobject) {
+            metaobject {
+              id
+              type
+              handle
+              displayName
+              fields {
+                key
+                value
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const variables = {
+        id: args.id,
+        metaobject: {
+          fields: args.fields,
+        },
+      };
+      const result = await shopifyGQL(mutation, variables);
+      if (result.metaobjectUpdate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metaobjectUpdate.userErrors)}`
+        );
+      }
+      return ok(result.metaobjectUpdate.metaobject);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_metaobject: async (args) => {
+    try {
+      const mutation = `
+        mutation DeleteMetaobject($id: ID!) {
+          metaobjectDelete(id: $id) {
+            deletedId
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const variables = { id: args.id };
+      const result = await shopifyGQL(mutation, variables);
+      if (result.metaobjectDelete?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metaobjectDelete.userErrors)}`
+        );
+      }
+      return ok({ deletedId: result.metaobjectDelete.deletedId });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_product_taxonomy: async (args) => {
+    try {
+      const query = `
+        query {
+          taxonomyCategories(first: 100) {
+            edges {
+              node {
+                id
+                name
+                children(first: 50) {
+                  edges {
+                    node {
+                      id
+                      name
+                      children(first: 50) {
+                        edges {
+                          node {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query);
+      return ok(result.taxonomyCategories.edges.map((e) => e.node) || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_publications: async (args) => {
+    try {
+      const query = `
+        query {
+          publications(first: 100) {
+            edges {
+              node {
+                id
+                name
+                app {
+                  installation {
+                    activated
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query);
+      return ok(result.publications.edges.map((e) => e.node) || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  publish_product_to_channel: async (args) => {
+    try {
+      const publicationIds = args.publication_ids
+        .split(',')
+        .map((id) => id.trim());
+      const mutation = `
+        mutation PublishProduct($input: PublishablePublishInput!) {
+          publishablePublish(input: $input) {
+            publishable {
+              onlineStoreUrl
+              publicationCount
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const variables = {
+        input: {
+          id: `gid://shopify/Product/${args.product_id}`,
+          publicationIds: publicationIds,
+        },
+      };
+      const result = await shopifyGQL(mutation, variables);
+      if (result.publishablePublish?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.publishablePublish.userErrors)}`
+        );
+      }
+      return ok(result.publishablePublish.publishable);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  unpublish_product_from_channel: async (args) => {
+    try {
+      const mutation = `
+        mutation UnpublishProduct($input: PublishableUnpublishInput!) {
+          publishableUnpublish(input: $input) {
+            publishable {
+              onlineStoreUrl
+              publicationCount
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const variables = {
+        input: {
+          id: `gid://shopify/Product/${args.product_id}`,
+          publicationId: args.publication_id,
+        },
+      };
+      const result = await shopifyGQL(mutation, variables);
+      if (result.publishableUnpublish?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.publishableUnpublish.userErrors)}`
+        );
+      }
+      return ok(result.publishableUnpublish.publishable);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_shop_info: async (args) => {
+    try {
+      const query = `
+        query {
+          shop {
+            name
+            url
+            currencyCode
+            plan {
+              displayName
+              partnerDevelopment
+            }
+            email
+            myshopifyDomain
+            ianaTimezone
+          }
+        }
+      `;
+      const result = await shopifyGQL(query);
+      return ok(result.shop);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+};
+
+// ─── Server Setup ──────────────────────────────────────────────────────────────
 const server = new Server(
   {
-    name: 'shopify-mcp-server',
-    version: '1.0.0',
+    name: 'Shopify MCP Server',
+    version: '1.0.2',
+    tools,
   },
   {
-    capabilities: {
-      tools: {},
+    request: async (request) => {
+      if (request.method === 'tools/list') {
+        return {
+          tools: ListToolsRequestSchema.parse({
+            tools,
+          }).tools,
+        };
+      }
+      if (request.method === 'tools/call') {
+        const { name, arguments: toolArgs } = CallToolRequestSchema.parse(
+          request
+        ).params;
+        const handler = handlers[name];
+        if (!handler) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+          };
+        }
+        const result = await handler(toolArgs);
+        return {
+          isError: !result.success,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+      throw new Error('Unknown request method');
     },
   }
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools,
-}));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: toolArgs } = request.params;
-  const result = await handleToolCall(name, toolArgs);
-  return {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(result, null, 2),
-      },
-    ],
-  };
-});
-
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.log('Shopify MCP Server running — store:', SHOPIFY_STORE_DOMAIN);
-}
-
-main().catch(console.error);
+const transport = new StdioServerTransport();
+await server.connect(transport);
+console.error('Shopify MCP Server running — store:', SHOPIFY_STORE_DOMAIN);
