@@ -1,6 +1,6 @@
 {
   "name": "shopify-mcp-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A comprehensive MCP server for the Shopify Admin API — products, orders, customers, inventory, metaobjects, reports, and more.",
   "type": "module",
   "bin": {
