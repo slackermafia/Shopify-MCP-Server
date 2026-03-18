@@ -2468,10 +2468,13 @@ const handlers = {
         .split(',')
         .map((id) => id.trim());
       const mutation = `
-        mutation PublishProduct($input: PublishablePublishInput!) {
-          publishablePublish(input: $input) {
+        mutation PublishProduct($id: ID!, $input: [PublicationInput!]!) {
+          publishablePublish(id: $id, input: $input) {
             publishable {
-              onlineStoreUrl
+              ... on Product {
+                id
+                title
+              }
               publicationCount
             }
             userErrors {
@@ -2482,10 +2485,10 @@ const handlers = {
         }
       `;
       const variables = {
-        input: {
-          id: `gid://shopify/Product/${args.product_id}`,
-          publicationIds: publicationIds,
-        },
+        id: `gid://shopify/Product/${args.product_id}`,
+        input: publicationIds.map((pubId) => ({
+          publicationId: pubId.startsWith('gid://') ? pubId : `gid://shopify/Publication/${pubId}`,
+        })),
       };
       const result = await shopifyGQL(mutation, variables);
       if (result.publishablePublish?.userErrors?.length) {
@@ -2502,10 +2505,13 @@ const handlers = {
   unpublish_product_from_channel: async (args) => {
     try {
       const mutation = `
-        mutation UnpublishProduct($input: PublishableUnpublishInput!) {
-          publishableUnpublish(input: $input) {
+        mutation UnpublishProduct($id: ID!, $input: [PublicationInput!]!) {
+          publishableUnpublish(id: $id, input: $input) {
             publishable {
-              onlineStoreUrl
+              ... on Product {
+                id
+                title
+              }
               publicationCount
             }
             userErrors {
@@ -2515,11 +2521,12 @@ const handlers = {
           }
         }
       `;
+      const pubId = args.publication_id.startsWith('gid://')
+        ? args.publication_id
+        : `gid://shopify/Publication/${args.publication_id}`;
       const variables = {
-        input: {
-          id: `gid://shopify/Product/${args.product_id}`,
-          publicationId: args.publication_id,
-        },
+        id: `gid://shopify/Product/${args.product_id}`,
+        input: [{ publicationId: pubId }],
       };
       const result = await shopifyGQL(mutation, variables);
       if (result.publishableUnpublish?.userErrors?.length) {
