@@ -2448,9 +2448,7 @@ const handlers = {
                 id
                 name
                 app {
-                  installation {
-                    activated
-                  }
+                  title
                 }
               }
             }
