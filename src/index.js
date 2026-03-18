@@ -1356,32 +1356,46 @@ const tools = [
   },
   {
     name: 'set_variant_metafield',
-    description: 'Set or update a metafield on a specific product variant',
+    description: 'Set or update metafields on product variants. Supports batching: pass a single metafield (variant_id + namespace/key/type/value) OR an array of metafields to set up to 25 at once across multiple variants.',
     inputSchema: {
       type: 'object',
       properties: {
         variant_id: {
           type: 'string',
-          description: 'The variant ID (numeric or GID like "gid://shopify/ProductVariant/12345")',
+          description: 'The variant ID (numeric or GID). Used for single metafield mode.',
         },
         namespace: {
           type: 'string',
-          description: 'Metafield namespace (e.g. "custom", "my_fields")',
+          description: 'Metafield namespace (e.g. "custom"). Used for single metafield mode.',
         },
         key: {
           type: 'string',
-          description: 'Metafield key (e.g. "material", "dimensions")',
+          description: 'Metafield key (e.g. "material"). Used for single metafield mode.',
         },
         type: {
           type: 'string',
-          description: 'Metafield type (e.g. "single_line_text_field", "number_integer", "json", "boolean")',
+          description: 'Metafield type (e.g. "single_line_text_field", "number_integer", "json", "boolean"). Used for single metafield mode.',
         },
         value: {
           type: 'string',
-          description: 'Metafield value (must be a string — for JSON types, pass a JSON string)',
+          description: 'Metafield value (must be a string). Used for single metafield mode.',
+        },
+        metafields: {
+          type: 'array',
+          description: 'Batch mode: array of metafield objects, each with variant_id, namespace, key, type, value. Max 25 per call. Can span multiple variants.',
+          items: {
+            type: 'object',
+            properties: {
+              variant_id: { type: 'string' },
+              namespace: { type: 'string' },
+              key: { type: 'string' },
+              type: { type: 'string' },
+              value: { type: 'string' },
+            },
+            required: ['variant_id', 'namespace', 'key', 'type', 'value'],
+          },
         },
       },
-      required: ['variant_id', 'namespace', 'key', 'type', 'value'],
     },
   },
 ];
@@ -1510,7 +1524,7 @@ const handlers = {
           `GraphQL errors: ${JSON.stringify(result.productUpdate.userErrors)}`
         );
       }
-      return ok(result.productUpdate.product);
+      return { success: true, data: { id: result.productUpdate.product?.id, category: result.productUpdate.product?.category?.name } };
     } catch (error) {
       return err(error.message);
     }
@@ -1643,14 +1657,14 @@ const handlers = {
         value: args.value,
         type: args.type,
       };
-      const result = await shopifyREST(
+      await shopifyREST(
         `/products/${args.product_id}/metafields.json`,
         {
           method: 'POST',
           body: JSON.stringify({ metafield }),
         }
       );
-      return ok(result);
+      return { success: true, data: { namespace: args.namespace, key: args.key } };
     } catch (error) {
       return err(error.message);
     }
@@ -2155,7 +2169,7 @@ const handlers = {
           body: JSON.stringify({ inventory_item: updateBody }),
         }
       );
-      return ok(result.inventory_item);
+      return { success: true, data: { id: result.inventory_item.id, hs_code: result.inventory_item.harmonized_system_code, country: result.inventory_item.country_code_of_origin } };
     } catch (error) {
       return err(error.message);
     }
@@ -2762,7 +2776,9 @@ const handlers = {
           `Media errors: ${JSON.stringify(mediaResult.productCreateMedia.mediaUserErrors)}`
         );
       }
-      return ok(mediaResult.productCreateMedia.media);
+      // Return minimal confirmation — just the media ID
+      const media = mediaResult.productCreateMedia.media?.[0];
+      return { success: true, data: { mediaId: media?.id || null } };
     } catch (error) {
       return err(error.message);
     }
@@ -2770,28 +2786,30 @@ const handlers = {
 
   set_variant_metafield: async (args) => {
     try {
-      const { variant_id, namespace, key, type, value } = args;
-
-      let variantGid = variant_id;
-      if (!variant_id.startsWith('gid://')) {
-        variantGid = `gid://shopify/ProductVariant/${variant_id}`;
+      // Build metafields array — supports single or batch mode
+      let entries;
+      if (args.metafields && Array.isArray(args.metafields)) {
+        entries = args.metafields;
+      } else if (args.variant_id && args.namespace && args.key && args.type && args.value) {
+        entries = [{ variant_id: args.variant_id, namespace: args.namespace, key: args.key, type: args.type, value: args.value }];
+      } else {
+        throw new Error('Provide either (variant_id + namespace/key/type/value) or a metafields array');
       }
+
+      if (entries.length > 25) {
+        throw new Error(`Max 25 metafields per call (got ${entries.length})`);
+      }
+
+      const metafields = entries.map((e) => {
+        const vid = e.variant_id.startsWith('gid://') ? e.variant_id : `gid://shopify/ProductVariant/${e.variant_id}`;
+        return { ownerId: vid, namespace: e.namespace, key: e.key, type: e.type, value: e.value };
+      });
 
       const mutation = `
         mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
             metafields {
-              id
-              namespace
               key
-              value
-              type
-              owner {
-                ... on ProductVariant {
-                  id
-                  title
-                }
-              }
             }
             userErrors {
               field
@@ -2800,23 +2818,12 @@ const handlers = {
           }
         }
       `;
-      const result = await shopifyGQL(mutation, {
-        metafields: [
-          {
-            ownerId: variantGid,
-            namespace,
-            key,
-            type,
-            value,
-          },
-        ],
-      });
-      if (result.metafieldsSet.userErrors?.length) {
-        throw new Error(
-          `Metafield errors: ${JSON.stringify(result.metafieldsSet.userErrors)}`
-        );
+      const result = await shopifyGQL(mutation, { metafields });
+      const errors = result.metafieldsSet.userErrors || [];
+      if (errors.length) {
+        return { success: false, error: `Some metafields failed`, details: errors, set: result.metafieldsSet.metafields?.length || 0 };
       }
-      return ok(result.metafieldsSet.metafields);
+      return { success: true, data: { set: result.metafieldsSet.metafields.length, of: entries.length } };
     } catch (error) {
       return err(error.message);
     }
