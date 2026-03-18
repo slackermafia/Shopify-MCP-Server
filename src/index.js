@@ -996,6 +996,40 @@ const tools = [
     },
   },
   {
+    name: 'update_inventory_item',
+    description: 'Update an inventory item (HS code, country of origin, tracking, cost, etc.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        inventory_item_id: {
+          type: 'string',
+          description: 'The inventory item ID (numeric)',
+        },
+        harmonized_system_code: {
+          type: 'string',
+          description: 'HS (Harmonized System) tariff code for customs (e.g. "9405421000")',
+        },
+        country_code_of_origin: {
+          type: 'string',
+          description: 'ISO 3166-1 alpha-2 country code where the item was manufactured (e.g. "CN", "US")',
+        },
+        province_code_of_origin: {
+          type: 'string',
+          description: 'Province/state code of origin (e.g. "CA" for California)',
+        },
+        tracked: {
+          type: 'boolean',
+          description: 'Whether inventory is tracked for this item',
+        },
+        cost: {
+          type: 'string',
+          description: 'Unit cost of the item (e.g. "25.00")',
+        },
+      },
+      required: ['inventory_item_id'],
+    },
+  },
+  {
     name: 'list_price_rules',
     description: 'List all price rules (discount types)',
     inputSchema: {
@@ -2097,6 +2131,31 @@ const handlers = {
         }
       );
       return ok(result);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_inventory_item: async (args) => {
+    try {
+      const updateBody = {};
+      if (args.harmonized_system_code !== undefined)
+        updateBody.harmonized_system_code = args.harmonized_system_code;
+      if (args.country_code_of_origin !== undefined)
+        updateBody.country_code_of_origin = args.country_code_of_origin;
+      if (args.province_code_of_origin !== undefined)
+        updateBody.province_code_of_origin = args.province_code_of_origin;
+      if (args.tracked !== undefined) updateBody.tracked = args.tracked;
+      if (args.cost !== undefined) updateBody.cost = args.cost;
+
+      const result = await shopifyREST(
+        `/inventory_items/${args.inventory_item_id}.json`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ inventory_item: updateBody }),
+        }
+      );
+      return ok(result.inventory_item);
     } catch (error) {
       return err(error.message);
     }
