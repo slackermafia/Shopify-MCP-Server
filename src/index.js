@@ -1398,6 +1398,121 @@ const tools = [
       },
     },
   },
+  // ─── Themes ──────────────────────────────────────────────────────────────────
+  {
+    name: 'list_themes',
+    description: 'List all themes in the store',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'get_theme',
+    description: 'Get a theme by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme_id: { type: 'string', description: 'The theme ID' },
+      },
+      required: ['theme_id'],
+    },
+  },
+  {
+    name: 'create_theme',
+    description: 'Create a new theme (from a ZIP URL or blank)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Theme name (required)' },
+        src: { type: 'string', description: 'URL of a .zip file containing the theme (optional)' },
+        role: {
+          type: 'string',
+          description: 'Theme role: "main" (published), "unpublished", or "demo"',
+          enum: ['main', 'unpublished', 'demo'],
+        },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'update_theme',
+    description: 'Update a theme (name or role)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme_id: { type: 'string', description: 'The theme ID (required)' },
+        name: { type: 'string', description: 'New theme name' },
+        role: {
+          type: 'string',
+          description: 'Theme role: "main" (publishes it), "unpublished", or "demo"',
+          enum: ['main', 'unpublished', 'demo'],
+        },
+      },
+      required: ['theme_id'],
+    },
+  },
+  {
+    name: 'delete_theme',
+    description: 'Delete a theme by ID (cannot delete the published theme)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme_id: { type: 'string', description: 'The theme ID' },
+      },
+      required: ['theme_id'],
+    },
+  },
+  // ─── Theme Assets (Files) ────────────────────────────────────────────────────
+  {
+    name: 'list_theme_assets',
+    description: 'List all asset file paths in a theme (returns keys only, not file contents)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme_id: { type: 'string', description: 'The theme ID' },
+      },
+      required: ['theme_id'],
+    },
+  },
+  {
+    name: 'get_theme_asset',
+    description: 'Read a single theme file by its key (e.g. "templates/index.json", "sections/header.liquid")',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme_id: { type: 'string', description: 'The theme ID' },
+        key: { type: 'string', description: 'Asset key / file path (e.g. "layout/theme.liquid", "config/settings_data.json")' },
+      },
+      required: ['theme_id', 'key'],
+    },
+  },
+  {
+    name: 'put_theme_asset',
+    description: 'Create or update a theme file. Provide either "value" (file content as string) or "src" (public URL to download from). For binary files like images, use "src".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme_id: { type: 'string', description: 'The theme ID' },
+        key: { type: 'string', description: 'Asset key / file path (e.g. "sections/custom.liquid")' },
+        value: { type: 'string', description: 'File content as a string (for text files like .liquid, .json, .css, .js)' },
+        src: { type: 'string', description: 'Public URL to download the file from (for images or any file type)' },
+      },
+      required: ['theme_id', 'key'],
+    },
+  },
+  {
+    name: 'delete_theme_asset',
+    description: 'Delete a theme file by key',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme_id: { type: 'string', description: 'The theme ID' },
+        key: { type: 'string', description: 'Asset key / file path to delete' },
+      },
+      required: ['theme_id', 'key'],
+    },
+  },
 ];
 
 // ─── Tool Handlers ────────────────────────────────────────────────────────────
@@ -2824,6 +2939,135 @@ const handlers = {
         return { success: false, error: `Some metafields failed`, details: errors, set: result.metafieldsSet.metafields?.length || 0 };
       }
       return { success: true, data: { set: result.metafieldsSet.metafields.length, of: entries.length } };
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  // ─── Themes ──────────────────────────────────────────────────────────────────
+
+  list_themes: async (args) => {
+    try {
+      const data = await shopifyREST('/themes.json');
+      return ok(
+        (data.themes || []).map((t) => ({
+          id: t.id,
+          name: t.name,
+          role: t.role,
+          created_at: t.created_at,
+          updated_at: t.updated_at,
+        }))
+      );
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_theme: async (args) => {
+    try {
+      const data = await shopifyREST(`/themes/${args.theme_id}.json`);
+      return ok(data.theme);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_theme: async (args) => {
+    try {
+      const body = { name: args.name };
+      if (args.src) body.src = args.src;
+      if (args.role) body.role = args.role;
+      const data = await shopifyREST('/themes.json', {
+        method: 'POST',
+        body: JSON.stringify({ theme: body }),
+      });
+      return { success: true, data: { id: data.theme.id, name: data.theme.name, role: data.theme.role } };
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_theme: async (args) => {
+    try {
+      const body = {};
+      if (args.name) body.name = args.name;
+      if (args.role) body.role = args.role;
+      const data = await shopifyREST(`/themes/${args.theme_id}.json`, {
+        method: 'PUT',
+        body: JSON.stringify({ theme: body }),
+      });
+      return { success: true, data: { id: data.theme.id, name: data.theme.name, role: data.theme.role } };
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_theme: async (args) => {
+    try {
+      await shopifyREST(`/themes/${args.theme_id}.json`, { method: 'DELETE' });
+      return { success: true, data: { deleted: args.theme_id } };
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  // ─── Theme Assets (Files) ────────────────────────────────────────────────────
+
+  list_theme_assets: async (args) => {
+    try {
+      const data = await shopifyREST(`/themes/${args.theme_id}/assets.json`);
+      return ok((data.assets || []).map((a) => a.key));
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_theme_asset: async (args) => {
+    try {
+      const data = await shopifyREST(
+        `/themes/${args.theme_id}/assets.json?asset[key]=${encodeURIComponent(args.key)}`
+      );
+      const asset = data.asset;
+      // Return value (text content) or public_url (for binary assets)
+      return ok({
+        key: asset.key,
+        content_type: asset.content_type,
+        size: asset.size,
+        value: asset.value || null,
+        public_url: asset.public_url || null,
+      });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  put_theme_asset: async (args) => {
+    try {
+      const asset = { key: args.key };
+      if (args.value !== undefined) {
+        asset.value = args.value;
+      } else if (args.src) {
+        asset.src = args.src;
+      } else {
+        throw new Error('Provide either "value" (file content) or "src" (URL)');
+      }
+      await shopifyREST(`/themes/${args.theme_id}/assets.json`, {
+        method: 'PUT',
+        body: JSON.stringify({ asset }),
+      });
+      return { success: true, data: { key: args.key } };
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_theme_asset: async (args) => {
+    try {
+      await shopifyREST(
+        `/themes/${args.theme_id}/assets.json?asset[key]=${encodeURIComponent(args.key)}`,
+        { method: 'DELETE' }
+      );
+      return { success: true, data: { deleted: args.key } };
     } catch (error) {
       return err(error.message);
     }

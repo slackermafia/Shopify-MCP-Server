@@ -14,6 +14,7 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 - **Metafields** — get/set on products and variants
 - **Discounts** — price rules and discount codes (list, create, delete)
 - **Publishing** — list sales channels, publish/unpublish products to channels
+- **Themes** — list, create, update, delete themes; list, read, write, delete theme files (assets)
 
 ## Installation
 
@@ -58,9 +59,9 @@ node src/index.js
 2. Create a private app and grant it the Admin API scopes you need
 3. Copy the **Admin API access token**
 
-**Recommended scopes:** `read_products`, `write_products`, `read_orders`, `write_orders`, `read_customers`, `write_customers`, `read_inventory`, `write_inventory`, `read_price_rules`, `write_price_rules`, `read_discounts`, `write_discounts`, `read_content`, `write_content`, `read_metaobjects`, `write_metaobjects`
+**Recommended scopes:** `read_products`, `write_products`, `read_orders`, `write_orders`, `read_customers`, `write_customers`, `read_inventory`, `write_inventory`, `read_price_rules`, `write_price_rules`, `read_discounts`, `write_discounts`, `read_content`, `write_content`, `read_metaobjects`, `write_metaobjects`, `read_themes`, `write_themes`
 
-## Available Tools (61)
+## Available Tools (71)
 
 ### Shop
 | Tool | Description |
@@ -166,6 +167,23 @@ node src/index.js
 | `create_metaobject` | Create a new metaobject entry |
 | `update_metaobject` | Update metaobject fields |
 | `delete_metaobject` | Delete a metaobject entry |
+
+### Themes
+| Tool | Description |
+|------|-------------|
+| `list_themes` | List all themes in the store |
+| `get_theme` | Get a theme by ID |
+| `create_theme` | Create a new theme (from a ZIP URL or blank) |
+| `update_theme` | Update a theme (name or role/publish) |
+| `delete_theme` | Delete a theme |
+
+### Theme Assets (Files)
+| Tool | Description |
+|------|-------------|
+| `list_theme_assets` | List all file paths in a theme |
+| `get_theme_asset` | Read a theme file by key (e.g. `templates/index.json`) |
+| `put_theme_asset` | Create or update a theme file (text content or URL source) |
+| `delete_theme_asset` | Delete a theme file |
 
 ## Requirements
 
