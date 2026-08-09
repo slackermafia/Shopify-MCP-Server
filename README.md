@@ -6,12 +6,16 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 
 - **Products** — list, create, update, delete, publish/unpublish, variants CRUD, images (URL and base64), metafields, category taxonomy
 - **Collections** — custom & smart collections, add products, list collection products
+- **Navigation menus** — list, get, create, update, and delete online store menus
 - **Orders** — list, get, create, update, cancel, close, fulfill, refund, transactions
 - **Draft Orders** — list, create, complete
 - **Customers** — list, search, get, create, update, delete, customer order history
 - **Inventory** — locations, get/adjust/set inventory levels
 - **Metaobjects** — definitions (list/create) and entries (list/create/update/delete) via GraphQL
+- **Shopify Files** — upload local, base64, or remote images and documents; list, inspect, and delete files via GraphQL
 - **Metafields** — get/set on products and variants
+- **Metafield definitions** — list, create, update, and delete definitions for products, variants, pages, collections, and other owner types
+- **Pages** — list, get, create, update, delete pages, including template suffix assignment
 - **Discounts** — price rules and discount codes (list, create, delete)
 - **Publishing** — list sales channels, publish/unpublish products to channels
 - **Themes** — list, create, update, delete themes; list, read, write, delete theme files (assets)
@@ -25,10 +29,11 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
   "mcpServers": {
     "shopify": {
       "command": "npx",
-      "args": ["-y", "github:slackermafia/Shopify-MCP-Server"],
+      "args": ["-y", "github:Nextboom-Inc/Shopify-MCP-Server"],
       "env": {
         "SHOPIFY_STORE_DOMAIN": "your-store.myshopify.com",
-        "SHOPIFY_ACCESS_TOKEN": "shpat_xxxxxxxxxxxx"
+        "SHOPIFY_CLIENT_ID": "your-app-client-id",
+        "SHOPIFY_CLIENT_SECRET": "your-app-client-secret"
       }
     }
   }
@@ -38,11 +43,12 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 ### Clone & run locally
 
 ```bash
-git clone https://github.com/slackermafia/Shopify-MCP-Server.git
+git clone https://github.com/Nextboom-Inc/Shopify-MCP-Server.git
 cd Shopify-MCP-Server
 npm install
 SHOPIFY_STORE_DOMAIN=your-store.myshopify.com \
-SHOPIFY_ACCESS_TOKEN=shpat_xxxxxxxxxxxx \
+SHOPIFY_CLIENT_ID=your-app-client-id \
+SHOPIFY_CLIENT_SECRET=your-app-client-secret \
 node src/index.js
 ```
 
@@ -51,17 +57,78 @@ node src/index.js
 | Environment Variable    | Description                              |
 |------------------------|------------------------------------------|
 | `SHOPIFY_STORE_DOMAIN` | Your store domain, e.g. `store.myshopify.com` |
-| `SHOPIFY_ACCESS_TOKEN` | Shopify Admin API access token           |
+| `SHOPIFY_ACCESS_TOKEN` | Optional static Shopify Admin API token (legacy fallback) |
+| `SHOPIFY_CLIENT_ID`    | App client ID for token exchange         |
+| `SHOPIFY_CLIENT_SECRET`| App client secret for token exchange     |
 
-### Getting an Access Token
+### Authentication
 
-1. Go to your Shopify Admin → **Settings → Apps and sales channels → Develop apps**
-2. Create a private app and grant it the Admin API scopes you need
-3. Copy the **Admin API access token**
+Preferred: provide `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET`. The server requests a fresh access token from:
 
-**Recommended scopes:** `read_products`, `write_products`, `read_orders`, `write_orders`, `read_customers`, `write_customers`, `read_inventory`, `write_inventory`, `read_price_rules`, `write_price_rules`, `read_discounts`, `write_discounts`, `read_content`, `write_content`, `read_metaobjects`, `write_metaobjects`, `read_themes`, `write_themes`
+- `POST https://{SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token`
+- Body: `grant_type=client_credentials`, `client_id`, `client_secret`
 
-## Available Tools (71)
+Fallback: if `SHOPIFY_ACCESS_TOKEN` is set, the server will use it directly.
+
+### Getting app credentials and scopes
+
+1. Go to the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard)
+2. Create or select an app for the store
+3. In the app's API access settings, grant the Admin API scopes you need
+4. Install or reauthorize the app on the target Shopify store after changing scopes
+5. Copy the app's client ID and client secret into your MCP server environment
+
+### Admin API scopes
+
+The MCP server can be run with only the scopes needed for the tools you plan to use. To enable every currently implemented tool, grant the app these Admin API scopes:
+
+```text
+read_products,write_products,
+read_inventory,write_inventory,read_locations,
+read_customers,write_customers,
+read_orders,write_orders,read_all_orders,
+read_draft_orders,write_draft_orders,
+read_price_rules,write_price_rules,
+read_discounts,write_discounts,
+read_metaobjects,write_metaobjects,
+read_metaobject_definitions,write_metaobject_definitions,
+read_publications,write_publications,
+read_themes,write_themes,
+read_fulfillments,write_fulfillments,
+read_content,write_content,
+read_online_store_pages,write_online_store_pages,
+read_online_store_navigation,write_online_store_navigation,
+read_files,write_files
+```
+
+Scope groups by tool area:
+
+| Tool area | Scopes |
+|-----------|--------|
+| Shop info | No dedicated scope beyond Admin API access |
+| Products, variants, product images, product metafields, product taxonomy | `read_products`, `write_products` |
+| Variant metafields | `write_products` |
+| Collections and collection membership | `read_products`, `write_products` |
+| Navigation menus | `read_online_store_navigation`, `write_online_store_navigation` |
+| Publications / sales channels | `read_publications`, `write_publications` |
+| Orders, refunds, transactions, customer order history | `read_orders`, `write_orders`; add `read_all_orders` if you need access beyond Shopify's normal recent-order window |
+| Fulfillments | `read_fulfillments`, `write_fulfillments` |
+| Draft orders | `read_draft_orders`, `write_draft_orders` |
+| Customers | `read_customers`, `write_customers` |
+| Inventory levels and inventory items | `read_inventory`, `write_inventory` |
+| Locations | `read_locations` |
+| Price rules | `read_price_rules`, `write_price_rules` |
+| Discount codes | `read_discounts`, `write_discounts` |
+| Metaobject entries | `read_metaobjects`, `write_metaobjects` |
+| Metaobject definitions | `read_metaobject_definitions`, `write_metaobject_definitions` |
+| Shopify Files (images, videos, documents, and 3D models) | `read_files`, `write_files` |
+| Metafield definitions | Owner resource scopes, for example `read_products`, `write_products` for product definitions and `read_content`, `write_content`, `read_online_store_pages`, `write_online_store_pages` for page definitions |
+| Pages and page templates | `read_content`, `write_content`, `read_online_store_pages`, `write_online_store_pages` |
+| Themes and theme assets | `read_themes`, `write_themes` |
+
+The server does not currently implement blog or article tools. Page tools use Admin GraphQL's Page API and support `templateSuffix` for assigning page templates.
+
+## Available Tools (89)
 
 ### Shop
 | Tool | Description |
@@ -109,6 +176,15 @@ node src/index.js
 | `update_collection` | Update collection title, description, sort order |
 | `add_product_to_collection` | Add a product to a custom collection |
 | `list_collection_products` | List products in a collection |
+
+### Navigation Menus
+| Tool | Description |
+|------|-------------|
+| `list_menus` | List online store navigation menus |
+| `get_menu` | Get a navigation menu by ID |
+| `create_menu` | Create an online store navigation menu |
+| `update_menu` | Update an online store navigation menu |
+| `delete_menu` | Delete an online store navigation menu |
 
 ### Orders
 | Tool | Description |
@@ -165,8 +241,36 @@ node src/index.js
 | `create_metaobject_definition` | Create a new metaobject definition with fields |
 | `list_metaobjects` | List metaobject entries by type |
 | `create_metaobject` | Create a new metaobject entry |
-| `update_metaobject` | Update metaobject fields |
+| `update_metaobject` | Create or update fields by type and handle, with compatibility for existing ID-based callers |
 | `delete_metaobject` | Delete a metaobject entry |
+
+File-reference fields accept the GID returned by `upload_file` as their string value.
+
+### Metafield Definitions (GraphQL)
+| Tool | Description |
+|------|-------------|
+| `list_metafield_definitions` | List metafield definitions for an owner type |
+| `create_metafield_definition` | Create a metafield definition |
+| `update_metafield_definition` | Update a metafield definition |
+| `delete_metafield_definition` | Delete a metafield definition |
+
+### Pages (GraphQL)
+| Tool | Description |
+|------|-------------|
+| `list_pages` | List online store pages |
+| `get_page` | Get a page by ID, including metafields |
+| `create_page` | Create a page, including optional template suffix |
+| `update_page` | Update a page, including template suffix |
+| `delete_page` | Delete a page |
+
+### Shopify Files (GraphQL)
+
+| Tool | Description |
+|------|-------------|
+| `upload_file` | Upload an image, video, 3D model, PDF, or other file from a local path, base64 data, or supported public URL |
+| `list_files` | List Shopify Files assets with search filtering and cursor pagination |
+| `get_file` | Read a file's processing status and CDN URL by GID |
+| `delete_files` | Permanently delete up to 250 files by GID |
 
 ### Themes
 | Tool | Description |

@@ -1,21 +1,30 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
-import { basename, extname } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import {
+  fileContentTypeForMimeType,
+  resolveUploadData,
+  stageUpload,
+  stagedResourceForContentType,
+} from './file-upload.js';
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
+const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 
-if (!SHOPIFY_STORE_DOMAIN || !SHOPIFY_ACCESS_TOKEN) {
+if (
+  !SHOPIFY_STORE_DOMAIN ||
+  (!SHOPIFY_ACCESS_TOKEN && (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET))
+) {
   console.error(
-    'ERROR: Missing required environment variables: SHOPIFY_STORE_DOMAIN, SHOPIFY_ACCESS_TOKEN'
+    'ERROR: Missing required environment variables. Required: SHOPIFY_STORE_DOMAIN plus either SHOPIFY_ACCESS_TOKEN or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET'
   );
   process.exit(1);
 }
@@ -23,15 +32,58 @@ if (!SHOPIFY_STORE_DOMAIN || !SHOPIFY_ACCESS_TOKEN) {
 const API_VERSION = '2026-01';
 const BASE_URL = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${API_VERSION}`;
 const GRAPHQL_URL = `${BASE_URL}/graphql.json`;
+const OAUTH_TOKEN_URL = `https://${SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token`;
+
+let tokenCache = {
+  accessToken: SHOPIFY_ACCESS_TOKEN || null,
+  expiresAtMs: SHOPIFY_ACCESS_TOKEN ? Number.MAX_SAFE_INTEGER : 0,
+};
+
+async function getAccessToken() {
+  if (tokenCache.accessToken && Date.now() < tokenCache.expiresAtMs - 30000) {
+    return tokenCache.accessToken;
+  }
+
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: SHOPIFY_CLIENT_ID,
+    client_secret: SHOPIFY_CLIENT_SECRET,
+  });
+
+  const res = await fetch(OAUTH_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const responseBody = await res.text();
+    throw new Error(`Shopify OAuth ${res.status}: ${responseBody}`);
+  }
+
+  const json = await res.json();
+  if (!json.access_token) {
+    throw new Error('Shopify OAuth response missing access_token');
+  }
+
+  tokenCache = {
+    accessToken: json.access_token,
+    expiresAtMs: Date.now() + (Number(json.expires_in || 3600) * 1000),
+  };
+  return tokenCache.accessToken;
+}
 
 // ─── HTTP Helpers ───────────────────────────────────────────────────────────
 async function shopifyREST(path, options = {}) {
+  const accessToken = await getAccessToken();
   const url = `${BASE_URL}${path}`;
   const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+      'X-Shopify-Access-Token': accessToken,
       ...(options.headers || {}),
     },
   });
@@ -44,11 +96,12 @@ async function shopifyREST(path, options = {}) {
 }
 
 async function shopifyGQL(query, variables = {}) {
+  const accessToken = await getAccessToken();
   const res = await fetch(GRAPHQL_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+      'X-Shopify-Access-Token': accessToken,
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -70,6 +123,30 @@ function ok(data) {
 function err(message) {
   return { success: false, error: message };
 }
+
+function toGid(resource, id) {
+  return String(id).startsWith('gid://')
+    ? id
+    : `gid://shopify/${resource}/${id}`;
+}
+
+const FILE_FIELDS = `
+  id
+  alt
+  fileStatus
+  createdAt
+  ... on MediaImage {
+    image {
+      url
+      width
+      height
+    }
+  }
+  ... on GenericFile {
+    url
+    mimeType
+  }
+`;
 
 const tools = [
   {
@@ -480,6 +557,86 @@ const tools = [
         limit: { type: 'number', description: 'Max results' },
       },
       required: ['collection_id'],
+    },
+  },
+  {
+    name: 'list_menus',
+    description: 'List online store navigation menus',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results' },
+        query: {
+          type: 'string',
+          description: 'Optional Shopify search query, e.g. "handle:main-menu"',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_menu',
+    description: 'Get a navigation menu by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        menu_id: {
+          type: 'string',
+          description: 'The menu ID, numeric or gid://shopify/Menu/...',
+        },
+      },
+      required: ['menu_id'],
+    },
+  },
+  {
+    name: 'create_menu',
+    description: 'Create an online store navigation menu',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Menu title' },
+        handle: { type: 'string', description: 'Unique menu handle' },
+        items: {
+          type: 'array',
+          description: 'Menu items as MenuItemCreateInput objects',
+          items: { type: 'object' },
+        },
+      },
+      required: ['title', 'handle', 'items'],
+    },
+  },
+  {
+    name: 'update_menu',
+    description: 'Update an online store navigation menu',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        menu_id: {
+          type: 'string',
+          description: 'The menu ID, numeric or gid://shopify/Menu/...',
+        },
+        title: { type: 'string', description: 'Menu title' },
+        handle: { type: 'string', description: 'Unique menu handle' },
+        items: {
+          type: 'array',
+          description: 'Full menu item tree as MenuItemUpdateInput objects',
+          items: { type: 'object' },
+        },
+      },
+      required: ['menu_id', 'title', 'items'],
+    },
+  },
+  {
+    name: 'delete_menu',
+    description: 'Delete an online store navigation menu',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        menu_id: {
+          type: 'string',
+          description: 'The menu ID, numeric or gid://shopify/Menu/...',
+        },
+      },
+      required: ['menu_id'],
     },
   },
   {
@@ -1232,14 +1389,16 @@ const tools = [
   },
   {
     name: 'update_metaobject',
-    description: 'Update fields on an existing metaobject',
+    description: 'Create or update a metaobject by type and handle. Existing ID-based callers remain supported through an automatic identity lookup.',
     inputSchema: {
       type: 'object',
       properties: {
         id: {
           type: 'string',
-          description: 'Metaobject GID (gid://shopify/Metaobject/...)',
+          description: 'Existing metaobject numeric ID or GID. Use this or provide both type and handle.',
         },
+        type: { type: 'string', description: 'Metaobject type. Provide with handle to avoid an ID lookup.' },
+        handle: { type: 'string', description: 'Metaobject handle. Provide with type to avoid an ID lookup.' },
         fields: {
           type: 'array',
           description: 'Field values to update',
@@ -1252,7 +1411,7 @@ const tools = [
           },
         },
       },
-      required: ['id', 'fields'],
+      required: ['fields'],
     },
   },
   {
@@ -1267,6 +1426,145 @@ const tools = [
         },
       },
       required: ['id'],
+    },
+  },
+  {
+    name: 'list_metafield_definitions',
+    description: 'List metafield definitions for an owner type',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner_type: {
+          type: 'string',
+          description: 'Metafield owner type, e.g. PRODUCT, PRODUCTVARIANT, PAGE, COLLECTION',
+        },
+        limit: { type: 'number', description: 'Max results' },
+        query: {
+          type: 'string',
+          description: 'Optional Shopify search query, e.g. "namespace:custom"',
+        },
+      },
+      required: ['owner_type'],
+    },
+  },
+  {
+    name: 'create_metafield_definition',
+    description: 'Create a metafield definition for an owner type',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        definition: {
+          type: 'object',
+          description: 'MetafieldDefinitionInput object',
+        },
+      },
+      required: ['definition'],
+    },
+  },
+  {
+    name: 'update_metafield_definition',
+    description: 'Update a metafield definition',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        definition: {
+          type: 'object',
+          description: 'MetafieldDefinitionUpdateInput object',
+        },
+      },
+      required: ['definition'],
+    },
+  },
+  {
+    name: 'delete_metafield_definition',
+    description: 'Delete a metafield definition',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        definition_id: {
+          type: 'string',
+          description: 'Metafield definition ID, numeric or gid://shopify/MetafieldDefinition/...',
+        },
+        delete_all_associated_metafields: {
+          type: 'boolean',
+          description: 'Delete all metafields that use this definition',
+        },
+      },
+      required: ['definition_id'],
+    },
+  },
+  {
+    name: 'list_pages',
+    description: 'List online store pages',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results' },
+        query: {
+          type: 'string',
+          description: 'Optional Shopify search query, e.g. "title:About"',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_page',
+    description: 'Get an online store page by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: {
+          type: 'string',
+          description: 'Page ID, numeric or gid://shopify/Page/...',
+        },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'create_page',
+    description: 'Create an online store page, including optional template suffix',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page: {
+          type: 'object',
+          description: 'PageCreateInput object. Supports title, handle, body, isPublished, templateSuffix.',
+        },
+      },
+      required: ['page'],
+    },
+  },
+  {
+    name: 'update_page',
+    description: 'Update an online store page, including template suffix',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: {
+          type: 'string',
+          description: 'Page ID, numeric or gid://shopify/Page/...',
+        },
+        page: {
+          type: 'object',
+          description: 'PageUpdateInput object. Supports title, handle, body, isPublished, templateSuffix.',
+        },
+      },
+      required: ['page_id', 'page'],
+    },
+  },
+  {
+    name: 'delete_page',
+    description: 'Delete an online store page',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: {
+          type: 'string',
+          description: 'Page ID, numeric or gid://shopify/Page/...',
+        },
+      },
+      required: ['page_id'],
     },
   },
   {
@@ -1396,6 +1694,92 @@ const tools = [
           },
         },
       },
+    },
+  },
+  // ─── Shopify Files ──────────────────────────────────────────────────────────
+  {
+    name: 'upload_file',
+    description: 'Upload an image, video, 3D model, PDF, or other file to Shopify Files. Accepts a local path, base64 data, or a public source URL and returns the Shopify file GID for use in metaobject and metafield references.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file_path: {
+          type: 'string',
+          description: 'Absolute local path. Provide exactly one of file_path, base64_data, or source_url.',
+        },
+        base64_data: {
+          type: 'string',
+          description: 'Base64 data, with or without a data URI prefix. Provide exactly one upload source.',
+        },
+        source_url: {
+          type: 'string',
+          description: 'Public source URL. Provide exactly one upload source. Videos and 3D models must use a local or base64 staged upload.',
+        },
+        filename: {
+          type: 'string',
+          description: 'Optional destination filename. Required for base64 uploads when the extension cannot be inferred.',
+        },
+        mime_type: {
+          type: 'string',
+          description: 'MIME type. Inferred from filename for local and base64 uploads when omitted.',
+        },
+        content_type: {
+          type: 'string',
+          enum: ['IMAGE', 'VIDEO', 'MODEL_3D', 'FILE'],
+          description: 'Shopify file content type. Inferred from MIME type when omitted.',
+        },
+        alt_text: {
+          type: 'string',
+          maxLength: 512,
+          description: 'Accessibility alt text (maximum 512 characters).',
+        },
+        duplicate_resolution_mode: {
+          type: 'string',
+          enum: ['APPEND_UUID', 'RAISE_ERROR', 'REPLACE'],
+          description: 'How Shopify handles an existing filename. Defaults to APPEND_UUID.',
+        },
+      },
+    },
+  },
+  {
+    name: 'list_files',
+    description: 'List images and other assets in Shopify Files, with optional Shopify search filtering and cursor pagination.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', minimum: 1, maximum: 250, description: 'Results per page (default 50, max 250).' },
+        after: { type: 'string', description: 'Cursor returned by a previous call.' },
+        query: { type: 'string', description: 'Shopify file search query, such as "media_type:IMAGE" or "filename:hero".' },
+        reverse: { type: 'boolean', description: 'Reverse the result order.' },
+      },
+    },
+  },
+  {
+    name: 'get_file',
+    description: 'Get a Shopify file by GID, including processing status and its CDN URL when ready.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Shopify file GID, such as gid://shopify/MediaImage/123.' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_files',
+    description: 'Permanently delete up to 250 Shopify Files assets by GID. This also removes their resource references.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 250,
+          items: { type: 'string' },
+          description: 'Shopify file GIDs to delete.',
+        },
+      },
+      required: ['ids'],
     },
   },
   // ─── Themes ──────────────────────────────────────────────────────────────────
@@ -1868,11 +2252,23 @@ const handlers = {
 
   add_product_to_collection: async (args) => {
     try {
-      const result = await shopifyREST(
-        `/custom_collections/${args.collection_id}/products/${args.product_id}.json`,
-        { method: 'PUT', body: JSON.stringify({}) }
+      const existing = await shopifyREST(
+        `/collects.json?collection_id=${encodeURIComponent(args.collection_id)}&product_id=${encodeURIComponent(args.product_id)}&limit=1`
       );
-      return ok(result);
+      if (existing.collects?.length) {
+        return ok(existing.collects[0]);
+      }
+
+      const result = await shopifyREST('/collects.json', {
+        method: 'POST',
+        body: JSON.stringify({
+          collect: {
+            collection_id: Number(args.collection_id),
+            product_id: Number(args.product_id),
+          },
+        }),
+      });
+      return ok(result.collect);
     } catch (error) {
       return err(error.message);
     }
@@ -1880,10 +2276,181 @@ const handlers = {
 
   list_collection_products: async (args) => {
     try {
-      const data = await shopifyREST(
-        `/custom_collections/${args.collection_id}/products.json${args.limit ? `?limit=${args.limit}` : ''}`
-      );
+      const params = [`collection_id=${encodeURIComponent(args.collection_id)}`];
+      if (args.limit) params.push(`limit=${args.limit}`);
+      const data = await shopifyREST(`/products.json?${params.join('&')}`);
       return ok(data.products || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_menus: async (args) => {
+    try {
+      const query = `
+        query ListMenus($first: Int!, $query: String) {
+          menus(first: $first, query: $query) {
+            nodes {
+              id
+              handle
+              title
+              isDefault
+              items {
+                id
+                title
+                type
+                url
+                resourceId
+                tags
+                items {
+                  id
+                  title
+                  type
+                  url
+                  resourceId
+                  tags
+                }
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        first: args.limit || 20,
+        query: args.query || null,
+      });
+      return ok(result.menus.nodes || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_menu: async (args) => {
+    try {
+      const query = `
+        query GetMenu($id: ID!) {
+          menu(id: $id) {
+            id
+            handle
+            title
+            isDefault
+            items {
+              id
+              title
+              type
+              url
+              resourceId
+              tags
+              items {
+                id
+                title
+                type
+                url
+                resourceId
+                tags
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        id: toGid('Menu', args.menu_id),
+      });
+      return ok(result.menu);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_menu: async (args) => {
+    try {
+      const mutation = `
+        mutation CreateMenu($title: String!, $handle: String!, $items: [MenuItemCreateInput!]!) {
+          menuCreate(title: $title, handle: $handle, items: $items) {
+            menu {
+              id
+              handle
+              title
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        title: args.title,
+        handle: args.handle,
+        items: args.items,
+      });
+      if (result.menuCreate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.menuCreate.userErrors)}`
+        );
+      }
+      return ok(result.menuCreate.menu);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_menu: async (args) => {
+    try {
+      const mutation = `
+        mutation UpdateMenu($id: ID!, $title: String!, $handle: String, $items: [MenuItemUpdateInput!]!) {
+          menuUpdate(id: $id, title: $title, handle: $handle, items: $items) {
+            menu {
+              id
+              handle
+              title
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('Menu', args.menu_id),
+        title: args.title,
+        handle: args.handle || null,
+        items: args.items,
+      });
+      if (result.menuUpdate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.menuUpdate.userErrors)}`
+        );
+      }
+      return ok(result.menuUpdate.menu);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_menu: async (args) => {
+    try {
+      const mutation = `
+        mutation DeleteMenu($id: ID!) {
+          menuDelete(id: $id) {
+            deletedMenuId
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('Menu', args.menu_id),
+      });
+      if (result.menuDelete?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.menuDelete.userErrors)}`
+        );
+      }
+      return ok({ deletedMenuId: result.menuDelete.deletedMenuId });
     } catch (error) {
       return err(error.message);
     }
@@ -2380,16 +2947,14 @@ const handlers = {
                 name
                 type
                 description
-                fields(first: 25) {
-                  edges {
-                    node {
-                      name
-                      key
-                      description
-                      type
-                      required
-                    }
+                fieldDefinitions {
+                  name
+                  key
+                  description
+                  type {
+                    name
                   }
+                  required
                 }
               }
             }
@@ -2408,23 +2973,21 @@ const handlers = {
   create_metaobject_definition: async (args) => {
     try {
       const mutation = `
-        mutation CreateMetaobjectDefinition($definition: MetaobjectDefinitionInput!) {
+        mutation CreateMetaobjectDefinition($definition: MetaobjectDefinitionCreateInput!) {
           metaobjectDefinitionCreate(definition: $definition) {
             metaobjectDefinition {
               id
               name
               type
               description
-              fields(first: 25) {
-                edges {
-                  node {
-                    name
-                    key
-                    description
-                    type
-                    required
-                  }
+              fieldDefinitions {
+                name
+                key
+                description
+                type {
+                  name
                 }
+                required
               }
             }
             userErrors {
@@ -2439,7 +3002,7 @@ const handlers = {
           name: args.name,
           type: args.type,
           description: args.description,
-          fields: args.fields,
+          fieldDefinitions: args.fields,
         },
       };
       const result = await shopifyGQL(mutation, variables);
@@ -2525,9 +3088,39 @@ const handlers = {
 
   update_metaobject: async (args) => {
     try {
+      let identity = args.type && args.handle
+        ? { type: args.type, handle: args.handle }
+        : null;
+      if (!identity) {
+        if (!args.id) {
+          throw new Error('Provide id, or provide both type and handle');
+        }
+        const identityQuery = `
+          query MetaobjectIdentity($id: ID!) {
+            node(id: $id) {
+              ... on Metaobject {
+                id
+                type
+                handle
+              }
+            }
+          }
+        `;
+        const identityResult = await shopifyGQL(identityQuery, {
+          id: toGid('Metaobject', args.id),
+        });
+        if (!identityResult.node?.type || !identityResult.node?.handle) {
+          throw new Error(`Metaobject not found: ${args.id}`);
+        }
+        identity = identityResult.node;
+      }
+
       const mutation = `
-        mutation UpdateMetaobject($id: ID!, $metaobject: MetaobjectInput!) {
-          metaobjectUpdate(id: $id, metaobject: $metaobject) {
+        mutation UpsertMetaobject(
+          $handle: MetaobjectHandleInput!
+          $metaobject: MetaobjectUpsertInput!
+        ) {
+          metaobjectUpsert(handle: $handle, metaobject: $metaobject) {
             metaobject {
               id
               type
@@ -2546,18 +3139,16 @@ const handlers = {
         }
       `;
       const variables = {
-        id: args.id,
-        metaobject: {
-          fields: args.fields,
-        },
+        handle: { type: identity.type, handle: identity.handle },
+        metaobject: { fields: args.fields },
       };
       const result = await shopifyGQL(mutation, variables);
-      if (result.metaobjectUpdate?.userErrors?.length) {
+      if (result.metaobjectUpsert?.userErrors?.length) {
         throw new Error(
-          `GraphQL errors: ${JSON.stringify(result.metaobjectUpdate.userErrors)}`
+          `GraphQL errors: ${JSON.stringify(result.metaobjectUpsert.userErrors)}`
         );
       }
-      return ok(result.metaobjectUpdate.metaobject);
+      return ok(result.metaobjectUpsert.metaobject);
     } catch (error) {
       return err(error.message);
     }
@@ -2584,6 +3175,296 @@ const handlers = {
         );
       }
       return ok({ deletedId: result.metaobjectDelete.deletedId });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_metafield_definitions: async (args) => {
+    try {
+      const query = `
+        query ListMetafieldDefinitions($ownerType: MetafieldOwnerType!, $first: Int!, $query: String) {
+          metafieldDefinitions(ownerType: $ownerType, first: $first, query: $query) {
+            nodes {
+              id
+              name
+              namespace
+              key
+              ownerType
+              type {
+                name
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        ownerType: args.owner_type,
+        first: args.limit || 50,
+        query: args.query || null,
+      });
+      return ok(result.metafieldDefinitions.nodes || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_metafield_definition: async (args) => {
+    try {
+      const mutation = `
+        mutation CreateMetafieldDefinition($definition: MetafieldDefinitionInput!) {
+          metafieldDefinitionCreate(definition: $definition) {
+            createdDefinition {
+              id
+              name
+              namespace
+              key
+              ownerType
+              type {
+                name
+              }
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        definition: args.definition,
+      });
+      if (result.metafieldDefinitionCreate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metafieldDefinitionCreate.userErrors)}`
+        );
+      }
+      return ok(result.metafieldDefinitionCreate.createdDefinition);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_metafield_definition: async (args) => {
+    try {
+      const mutation = `
+        mutation UpdateMetafieldDefinition($definition: MetafieldDefinitionUpdateInput!) {
+          metafieldDefinitionUpdate(definition: $definition) {
+            updatedDefinition {
+              id
+              name
+              namespace
+              key
+              ownerType
+              type {
+                name
+              }
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        definition: args.definition,
+      });
+      if (result.metafieldDefinitionUpdate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metafieldDefinitionUpdate.userErrors)}`
+        );
+      }
+      return ok(result.metafieldDefinitionUpdate.updatedDefinition);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_metafield_definition: async (args) => {
+    try {
+      const mutation = `
+        mutation DeleteMetafieldDefinition($id: ID!, $deleteAllAssociatedMetafields: Boolean!) {
+          metafieldDefinitionDelete(id: $id, deleteAllAssociatedMetafields: $deleteAllAssociatedMetafields) {
+            deletedDefinitionId
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('MetafieldDefinition', args.definition_id),
+        deleteAllAssociatedMetafields: args.delete_all_associated_metafields || false,
+      });
+      if (result.metafieldDefinitionDelete?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metafieldDefinitionDelete.userErrors)}`
+        );
+      }
+      return ok({
+        deletedDefinitionId:
+          result.metafieldDefinitionDelete.deletedDefinitionId,
+      });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_pages: async (args) => {
+    try {
+      const query = `
+        query ListPages($first: Int!, $query: String) {
+          pages(first: $first, query: $query) {
+            nodes {
+              id
+              title
+              handle
+              body
+              isPublished
+              templateSuffix
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        first: args.limit || 50,
+        query: args.query || null,
+      });
+      return ok(result.pages.nodes || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_page: async (args) => {
+    try {
+      const query = `
+        query GetPage($id: ID!) {
+          page(id: $id) {
+            id
+            title
+            handle
+            body
+            isPublished
+            templateSuffix
+            metafields(first: 50) {
+              nodes {
+                id
+                namespace
+                key
+                type
+                value
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        id: toGid('Page', args.page_id),
+      });
+      return ok(result.page);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_page: async (args) => {
+    try {
+      const mutation = `
+        mutation CreatePage($page: PageCreateInput!) {
+          pageCreate(page: $page) {
+            page {
+              id
+              title
+              handle
+              isPublished
+              templateSuffix
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        page: args.page,
+      });
+      if (result.pageCreate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.pageCreate.userErrors)}`
+        );
+      }
+      return ok(result.pageCreate.page);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_page: async (args) => {
+    try {
+      const mutation = `
+        mutation UpdatePage($id: ID!, $page: PageUpdateInput!) {
+          pageUpdate(id: $id, page: $page) {
+            page {
+              id
+              title
+              handle
+              isPublished
+              templateSuffix
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('Page', args.page_id),
+        page: args.page,
+      });
+      if (result.pageUpdate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.pageUpdate.userErrors)}`
+        );
+      }
+      return ok(result.pageUpdate.page);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_page: async (args) => {
+    try {
+      const mutation = `
+        mutation DeletePage($id: ID!) {
+          pageDelete(id: $id) {
+            deletedPageId
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('Page', args.page_id),
+      });
+      if (result.pageDelete?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.pageDelete.userErrors)}`
+        );
+      }
+      return ok({ deletedPageId: result.pageDelete.deletedPageId });
     } catch (error) {
       return err(error.message);
     }
@@ -2753,102 +3634,166 @@ const handlers = {
     }
   },
 
-  add_product_image_base64: async (args) => {
+  upload_file: async (args) => {
     try {
-      const { product_id, base64_image, file_path, alt_text } = args;
-      let { filename, mime_type } = args;
-
-      // Resolve the image buffer from either file_path or base64_image
-      let imageBuffer;
-      if (file_path) {
-        imageBuffer = readFileSync(file_path);
-        if (!filename) filename = basename(file_path);
-        if (!mime_type) {
-          const ext = extname(file_path).toLowerCase();
-          const mimeMap = {
-            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
-          };
-          mime_type = mimeMap[ext] || 'image/png';
-        }
-      } else if (base64_image) {
-        imageBuffer = Buffer.from(base64_image, 'base64');
-      } else {
-        throw new Error('Either file_path or base64_image must be provided');
+      const sources = [args.file_path, args.base64_data, args.source_url].filter(Boolean);
+      if (sources.length !== 1) {
+        throw new Error('Provide exactly one of file_path, base64_data, or source_url');
       }
-      filename = filename || 'image.png';
-      mime_type = mime_type || 'image/png';
+      if (args.alt_text && args.alt_text.length > 512) {
+        throw new Error('alt_text cannot exceed 512 characters');
+      }
 
-      // Step 1: Create a staged upload target
-      const stagedMutation = `
-        mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
-          stagedUploadsCreate(input: $input) {
-            stagedTargets {
-              url
-              resourceUrl
-              parameters {
-                name
-                value
-              }
+      let originalSource = args.source_url;
+      let filename = args.filename;
+      let contentType = args.content_type;
+
+      if (!args.source_url) {
+        const upload = resolveUploadData(args);
+        filename = upload.filename;
+        contentType = contentType || fileContentTypeForMimeType(upload.mimeType);
+        if (contentType === 'EXTERNAL_VIDEO') {
+          throw new Error('EXTERNAL_VIDEO requires source_url');
+        }
+        originalSource = await stageUpload({
+          shopifyGQL,
+          buffer: upload.buffer,
+          filename: upload.filename,
+          mimeType: upload.mimeType,
+          resource: stagedResourceForContentType(contentType),
+        });
+      } else if (contentType === 'VIDEO' || contentType === 'MODEL_3D') {
+        throw new Error(`${contentType} requires file_path or base64_data so Shopify can stage the upload`);
+      }
+
+      const file = {
+        originalSource,
+        ...(filename ? { filename } : {}),
+        ...(contentType ? { contentType } : {}),
+        ...(args.alt_text !== undefined ? { alt: args.alt_text } : {}),
+        ...(args.duplicate_resolution_mode
+          ? { duplicateResolutionMode: args.duplicate_resolution_mode }
+          : {}),
+      };
+      const mutation = `
+        mutation FileCreate($files: [FileCreateInput!]!) {
+          fileCreate(files: $files) {
+            files {
+              ${FILE_FIELDS}
             }
             userErrors {
               field
               message
+              code
             }
           }
         }
       `;
-      const stagedResult = await shopifyGQL(stagedMutation, {
-        input: [
-          {
-            filename: filename || 'image.png',
-            mimeType: mime_type || 'image/png',
-            httpMethod: 'POST',
-            resource: 'IMAGE',
-          },
-        ],
+      const result = await shopifyGQL(mutation, { files: [file] });
+      if (result.fileCreate?.userErrors?.length) {
+        throw new Error(`File creation errors: ${JSON.stringify(result.fileCreate.userErrors)}`);
+      }
+      return ok(result.fileCreate.files?.[0] || null);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_files: async (args) => {
+    try {
+      const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 250);
+      const query = `
+        query Files($first: Int!, $after: String, $query: String, $reverse: Boolean!) {
+          files(first: $first, after: $after, query: $query, reverse: $reverse) {
+            nodes {
+              __typename
+              ${FILE_FIELDS}
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        first: limit,
+        after: args.after || null,
+        query: args.query || null,
+        reverse: Boolean(args.reverse),
       });
-      if (stagedResult.stagedUploadsCreate.userErrors?.length) {
-        throw new Error(
-          `Staged upload errors: ${JSON.stringify(stagedResult.stagedUploadsCreate.userErrors)}`
-        );
+      return ok(result.files);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_file: async (args) => {
+    try {
+      const query = `
+        query File($id: ID!) {
+          node(id: $id) {
+            __typename
+            ... on File {
+              ${FILE_FIELDS}
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, { id: args.id });
+      if (!result.node) throw new Error(`File not found: ${args.id}`);
+      return ok(result.node);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_files: async (args) => {
+    try {
+      if (!Array.isArray(args.ids) || args.ids.length < 1 || args.ids.length > 250) {
+        throw new Error('ids must contain between 1 and 250 Shopify file GIDs');
       }
-
-      const target = stagedResult.stagedUploadsCreate.stagedTargets[0];
-
-      // Step 2: Upload the image to the staged URL via multipart form POST
-      const boundary = '----FormBoundary' + Date.now().toString(36);
-      const parts = [];
-
-      // Add all parameters from the staged target
-      for (const param of target.parameters) {
-        parts.push(
-          `--${boundary}\r\nContent-Disposition: form-data; name="${param.name}"\r\n\r\n${param.value}\r\n`
-        );
+      const mutation = `
+        mutation FileDelete($fileIds: [ID!]!) {
+          fileDelete(fileIds: $fileIds) {
+            deletedFileIds
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, { fileIds: args.ids });
+      if (result.fileDelete?.userErrors?.length) {
+        throw new Error(`File deletion errors: ${JSON.stringify(result.fileDelete.userErrors)}`);
       }
+      return ok({ deletedFileIds: result.fileDelete.deletedFileIds || [] });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
 
-      // Add the file part
-      const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename || 'image.png'}"\r\nContent-Type: ${mime_type || 'image/png'}\r\n\r\n`;
-      const fileFooter = `\r\n--${boundary}--\r\n`;
-
-      const headerBuf = Buffer.from(fileHeader, 'utf-8');
-      const footerBuf = Buffer.from(fileFooter, 'utf-8');
-      const paramsBuf = Buffer.from(parts.join(''), 'utf-8');
-      const body = Buffer.concat([paramsBuf, headerBuf, imageBuffer, footerBuf]);
-
-      const uploadRes = await fetch(target.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length.toString(),
-        },
-        body,
+  add_product_image_base64: async (args) => {
+    try {
+      const { product_id, base64_image, file_path, alt_text } = args;
+      const upload = resolveUploadData({
+        file_path,
+        base64_data: base64_image,
+        filename: args.filename || 'image.png',
+        mime_type: args.mime_type || 'image/png',
       });
-
-      if (!uploadRes.ok) {
-        const errText = await uploadRes.text();
-        throw new Error(`Upload failed (${uploadRes.status}): ${errText}`);
+      if (!upload.mimeType.startsWith('image/')) {
+        throw new Error(`Expected an image MIME type, received ${upload.mimeType}`);
       }
+      const resourceUrl = await stageUpload({
+        shopifyGQL,
+        buffer: upload.buffer,
+        filename: upload.filename,
+        mimeType: upload.mimeType,
+        resource: 'IMAGE',
+      });
 
       // Step 3: Attach the uploaded image to the product
       let numericId = product_id;
@@ -2858,18 +3803,26 @@ const handlers = {
       }
 
       const mediaMutation = `
-        mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
-          productCreateMedia(productId: $productId, media: $media) {
-            media {
-              ... on MediaImage {
-                id
-                image {
-                  url
-                  altText
+        mutation AddProductMedia(
+          $product: ProductUpdateInput!
+          $media: [CreateMediaInput!]
+        ) {
+          productUpdate(product: $product, media: $media) {
+            product {
+              id
+              media(first: 1, reverse: true) {
+                nodes {
+                  id
+                  ... on MediaImage {
+                    image {
+                      url
+                      altText
+                    }
+                  }
                 }
               }
             }
-            mediaUserErrors {
+            userErrors {
               field
               message
             }
@@ -2877,23 +3830,29 @@ const handlers = {
         }
       `;
       const mediaResult = await shopifyGQL(mediaMutation, {
-        productId: `gid://shopify/Product/${numericId}`,
+        product: { id: `gid://shopify/Product/${numericId}` },
         media: [
           {
-            originalSource: target.resourceUrl,
+            originalSource: resourceUrl,
             mediaContentType: 'IMAGE',
             alt: alt_text || '',
           },
         ],
       });
-      if (mediaResult.productCreateMedia.mediaUserErrors?.length) {
+      if (mediaResult.productUpdate.userErrors?.length) {
         throw new Error(
-          `Media errors: ${JSON.stringify(mediaResult.productCreateMedia.mediaUserErrors)}`
+          `Media errors: ${JSON.stringify(mediaResult.productUpdate.userErrors)}`
         );
       }
       // Return minimal confirmation — just the media ID
-      const media = mediaResult.productCreateMedia.media?.[0];
-      return { success: true, data: { mediaId: media?.id || null } };
+      const media = mediaResult.productUpdate.product?.media?.nodes?.[0];
+      return {
+        success: true,
+        data: {
+          mediaId: media?.id || null,
+          productId: mediaResult.productUpdate.product?.id || null,
+        },
+      };
     } catch (error) {
       return err(error.message);
     }
@@ -3076,7 +4035,7 @@ const handlers = {
 
 // ─── Server Setup ──────────────────────────────────────────────────────────────
 const server = new Server(
-  { name: 'Shopify MCP Server', version: '1.0.2' },
+  { name: 'Shopify MCP Server', version: '1.1.0' },
   { capabilities: { tools: {} } }
 );
 
