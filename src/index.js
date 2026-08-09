@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
-import { basename, extname } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import {
+  fileContentTypeForMimeType,
+  resolveUploadData,
+  stageUpload,
+  stagedResourceForContentType,
+} from './file-upload.js';
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
@@ -125,6 +129,24 @@ function toGid(resource, id) {
     ? id
     : `gid://shopify/${resource}/${id}`;
 }
+
+const FILE_FIELDS = `
+  id
+  alt
+  fileStatus
+  createdAt
+  ... on MediaImage {
+    image {
+      url
+      width
+      height
+    }
+  }
+  ... on GenericFile {
+    url
+    mimeType
+  }
+`;
 
 const tools = [
   {
@@ -1367,14 +1389,16 @@ const tools = [
   },
   {
     name: 'update_metaobject',
-    description: 'Update fields on an existing metaobject',
+    description: 'Create or update a metaobject by type and handle. Existing ID-based callers remain supported through an automatic identity lookup.',
     inputSchema: {
       type: 'object',
       properties: {
         id: {
           type: 'string',
-          description: 'Metaobject GID (gid://shopify/Metaobject/...)',
+          description: 'Existing metaobject numeric ID or GID. Use this or provide both type and handle.',
         },
+        type: { type: 'string', description: 'Metaobject type. Provide with handle to avoid an ID lookup.' },
+        handle: { type: 'string', description: 'Metaobject handle. Provide with type to avoid an ID lookup.' },
         fields: {
           type: 'array',
           description: 'Field values to update',
@@ -1387,7 +1411,7 @@ const tools = [
           },
         },
       },
-      required: ['id', 'fields'],
+      required: ['fields'],
     },
   },
   {
@@ -1670,6 +1694,92 @@ const tools = [
           },
         },
       },
+    },
+  },
+  // ─── Shopify Files ──────────────────────────────────────────────────────────
+  {
+    name: 'upload_file',
+    description: 'Upload an image, video, 3D model, PDF, or other file to Shopify Files. Accepts a local path, base64 data, or a public source URL and returns the Shopify file GID for use in metaobject and metafield references.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file_path: {
+          type: 'string',
+          description: 'Absolute local path. Provide exactly one of file_path, base64_data, or source_url.',
+        },
+        base64_data: {
+          type: 'string',
+          description: 'Base64 data, with or without a data URI prefix. Provide exactly one upload source.',
+        },
+        source_url: {
+          type: 'string',
+          description: 'Public source URL. Provide exactly one upload source. Videos and 3D models must use a local or base64 staged upload.',
+        },
+        filename: {
+          type: 'string',
+          description: 'Optional destination filename. Required for base64 uploads when the extension cannot be inferred.',
+        },
+        mime_type: {
+          type: 'string',
+          description: 'MIME type. Inferred from filename for local and base64 uploads when omitted.',
+        },
+        content_type: {
+          type: 'string',
+          enum: ['IMAGE', 'VIDEO', 'MODEL_3D', 'FILE'],
+          description: 'Shopify file content type. Inferred from MIME type when omitted.',
+        },
+        alt_text: {
+          type: 'string',
+          maxLength: 512,
+          description: 'Accessibility alt text (maximum 512 characters).',
+        },
+        duplicate_resolution_mode: {
+          type: 'string',
+          enum: ['APPEND_UUID', 'RAISE_ERROR', 'REPLACE'],
+          description: 'How Shopify handles an existing filename. Defaults to APPEND_UUID.',
+        },
+      },
+    },
+  },
+  {
+    name: 'list_files',
+    description: 'List images and other assets in Shopify Files, with optional Shopify search filtering and cursor pagination.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', minimum: 1, maximum: 250, description: 'Results per page (default 50, max 250).' },
+        after: { type: 'string', description: 'Cursor returned by a previous call.' },
+        query: { type: 'string', description: 'Shopify file search query, such as "media_type:IMAGE" or "filename:hero".' },
+        reverse: { type: 'boolean', description: 'Reverse the result order.' },
+      },
+    },
+  },
+  {
+    name: 'get_file',
+    description: 'Get a Shopify file by GID, including processing status and its CDN URL when ready.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Shopify file GID, such as gid://shopify/MediaImage/123.' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_files',
+    description: 'Permanently delete up to 250 Shopify Files assets by GID. This also removes their resource references.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 250,
+          items: { type: 'string' },
+          description: 'Shopify file GIDs to delete.',
+        },
+      },
+      required: ['ids'],
     },
   },
   // ─── Themes ──────────────────────────────────────────────────────────────────
@@ -2978,9 +3088,39 @@ const handlers = {
 
   update_metaobject: async (args) => {
     try {
+      let identity = args.type && args.handle
+        ? { type: args.type, handle: args.handle }
+        : null;
+      if (!identity) {
+        if (!args.id) {
+          throw new Error('Provide id, or provide both type and handle');
+        }
+        const identityQuery = `
+          query MetaobjectIdentity($id: ID!) {
+            node(id: $id) {
+              ... on Metaobject {
+                id
+                type
+                handle
+              }
+            }
+          }
+        `;
+        const identityResult = await shopifyGQL(identityQuery, {
+          id: toGid('Metaobject', args.id),
+        });
+        if (!identityResult.node?.type || !identityResult.node?.handle) {
+          throw new Error(`Metaobject not found: ${args.id}`);
+        }
+        identity = identityResult.node;
+      }
+
       const mutation = `
-        mutation UpdateMetaobject($id: ID!, $metaobject: MetaobjectInput!) {
-          metaobjectUpdate(id: $id, metaobject: $metaobject) {
+        mutation UpsertMetaobject(
+          $handle: MetaobjectHandleInput!
+          $metaobject: MetaobjectUpsertInput!
+        ) {
+          metaobjectUpsert(handle: $handle, metaobject: $metaobject) {
             metaobject {
               id
               type
@@ -2999,18 +3139,16 @@ const handlers = {
         }
       `;
       const variables = {
-        id: args.id,
-        metaobject: {
-          fields: args.fields,
-        },
+        handle: { type: identity.type, handle: identity.handle },
+        metaobject: { fields: args.fields },
       };
       const result = await shopifyGQL(mutation, variables);
-      if (result.metaobjectUpdate?.userErrors?.length) {
+      if (result.metaobjectUpsert?.userErrors?.length) {
         throw new Error(
-          `GraphQL errors: ${JSON.stringify(result.metaobjectUpdate.userErrors)}`
+          `GraphQL errors: ${JSON.stringify(result.metaobjectUpsert.userErrors)}`
         );
       }
-      return ok(result.metaobjectUpdate.metaobject);
+      return ok(result.metaobjectUpsert.metaobject);
     } catch (error) {
       return err(error.message);
     }
@@ -3496,102 +3634,166 @@ const handlers = {
     }
   },
 
-  add_product_image_base64: async (args) => {
+  upload_file: async (args) => {
     try {
-      const { product_id, base64_image, file_path, alt_text } = args;
-      let { filename, mime_type } = args;
-
-      // Resolve the image buffer from either file_path or base64_image
-      let imageBuffer;
-      if (file_path) {
-        imageBuffer = readFileSync(file_path);
-        if (!filename) filename = basename(file_path);
-        if (!mime_type) {
-          const ext = extname(file_path).toLowerCase();
-          const mimeMap = {
-            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
-          };
-          mime_type = mimeMap[ext] || 'image/png';
-        }
-      } else if (base64_image) {
-        imageBuffer = Buffer.from(base64_image, 'base64');
-      } else {
-        throw new Error('Either file_path or base64_image must be provided');
+      const sources = [args.file_path, args.base64_data, args.source_url].filter(Boolean);
+      if (sources.length !== 1) {
+        throw new Error('Provide exactly one of file_path, base64_data, or source_url');
       }
-      filename = filename || 'image.png';
-      mime_type = mime_type || 'image/png';
+      if (args.alt_text && args.alt_text.length > 512) {
+        throw new Error('alt_text cannot exceed 512 characters');
+      }
 
-      // Step 1: Create a staged upload target
-      const stagedMutation = `
-        mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
-          stagedUploadsCreate(input: $input) {
-            stagedTargets {
-              url
-              resourceUrl
-              parameters {
-                name
-                value
-              }
+      let originalSource = args.source_url;
+      let filename = args.filename;
+      let contentType = args.content_type;
+
+      if (!args.source_url) {
+        const upload = resolveUploadData(args);
+        filename = upload.filename;
+        contentType = contentType || fileContentTypeForMimeType(upload.mimeType);
+        if (contentType === 'EXTERNAL_VIDEO') {
+          throw new Error('EXTERNAL_VIDEO requires source_url');
+        }
+        originalSource = await stageUpload({
+          shopifyGQL,
+          buffer: upload.buffer,
+          filename: upload.filename,
+          mimeType: upload.mimeType,
+          resource: stagedResourceForContentType(contentType),
+        });
+      } else if (contentType === 'VIDEO' || contentType === 'MODEL_3D') {
+        throw new Error(`${contentType} requires file_path or base64_data so Shopify can stage the upload`);
+      }
+
+      const file = {
+        originalSource,
+        ...(filename ? { filename } : {}),
+        ...(contentType ? { contentType } : {}),
+        ...(args.alt_text !== undefined ? { alt: args.alt_text } : {}),
+        ...(args.duplicate_resolution_mode
+          ? { duplicateResolutionMode: args.duplicate_resolution_mode }
+          : {}),
+      };
+      const mutation = `
+        mutation FileCreate($files: [FileCreateInput!]!) {
+          fileCreate(files: $files) {
+            files {
+              ${FILE_FIELDS}
             }
             userErrors {
               field
               message
+              code
             }
           }
         }
       `;
-      const stagedResult = await shopifyGQL(stagedMutation, {
-        input: [
-          {
-            filename: filename || 'image.png',
-            mimeType: mime_type || 'image/png',
-            httpMethod: 'POST',
-            resource: 'IMAGE',
-          },
-        ],
+      const result = await shopifyGQL(mutation, { files: [file] });
+      if (result.fileCreate?.userErrors?.length) {
+        throw new Error(`File creation errors: ${JSON.stringify(result.fileCreate.userErrors)}`);
+      }
+      return ok(result.fileCreate.files?.[0] || null);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_files: async (args) => {
+    try {
+      const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 250);
+      const query = `
+        query Files($first: Int!, $after: String, $query: String, $reverse: Boolean!) {
+          files(first: $first, after: $after, query: $query, reverse: $reverse) {
+            nodes {
+              __typename
+              ${FILE_FIELDS}
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        first: limit,
+        after: args.after || null,
+        query: args.query || null,
+        reverse: Boolean(args.reverse),
       });
-      if (stagedResult.stagedUploadsCreate.userErrors?.length) {
-        throw new Error(
-          `Staged upload errors: ${JSON.stringify(stagedResult.stagedUploadsCreate.userErrors)}`
-        );
+      return ok(result.files);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_file: async (args) => {
+    try {
+      const query = `
+        query File($id: ID!) {
+          node(id: $id) {
+            __typename
+            ... on File {
+              ${FILE_FIELDS}
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, { id: args.id });
+      if (!result.node) throw new Error(`File not found: ${args.id}`);
+      return ok(result.node);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_files: async (args) => {
+    try {
+      if (!Array.isArray(args.ids) || args.ids.length < 1 || args.ids.length > 250) {
+        throw new Error('ids must contain between 1 and 250 Shopify file GIDs');
       }
-
-      const target = stagedResult.stagedUploadsCreate.stagedTargets[0];
-
-      // Step 2: Upload the image to the staged URL via multipart form POST
-      const boundary = '----FormBoundary' + Date.now().toString(36);
-      const parts = [];
-
-      // Add all parameters from the staged target
-      for (const param of target.parameters) {
-        parts.push(
-          `--${boundary}\r\nContent-Disposition: form-data; name="${param.name}"\r\n\r\n${param.value}\r\n`
-        );
+      const mutation = `
+        mutation FileDelete($fileIds: [ID!]!) {
+          fileDelete(fileIds: $fileIds) {
+            deletedFileIds
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, { fileIds: args.ids });
+      if (result.fileDelete?.userErrors?.length) {
+        throw new Error(`File deletion errors: ${JSON.stringify(result.fileDelete.userErrors)}`);
       }
+      return ok({ deletedFileIds: result.fileDelete.deletedFileIds || [] });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
 
-      // Add the file part
-      const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename || 'image.png'}"\r\nContent-Type: ${mime_type || 'image/png'}\r\n\r\n`;
-      const fileFooter = `\r\n--${boundary}--\r\n`;
-
-      const headerBuf = Buffer.from(fileHeader, 'utf-8');
-      const footerBuf = Buffer.from(fileFooter, 'utf-8');
-      const paramsBuf = Buffer.from(parts.join(''), 'utf-8');
-      const body = Buffer.concat([paramsBuf, headerBuf, imageBuffer, footerBuf]);
-
-      const uploadRes = await fetch(target.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length.toString(),
-        },
-        body,
+  add_product_image_base64: async (args) => {
+    try {
+      const { product_id, base64_image, file_path, alt_text } = args;
+      const upload = resolveUploadData({
+        file_path,
+        base64_data: base64_image,
+        filename: args.filename || 'image.png',
+        mime_type: args.mime_type || 'image/png',
       });
-
-      if (!uploadRes.ok) {
-        const errText = await uploadRes.text();
-        throw new Error(`Upload failed (${uploadRes.status}): ${errText}`);
+      if (!upload.mimeType.startsWith('image/')) {
+        throw new Error(`Expected an image MIME type, received ${upload.mimeType}`);
       }
+      const resourceUrl = await stageUpload({
+        shopifyGQL,
+        buffer: upload.buffer,
+        filename: upload.filename,
+        mimeType: upload.mimeType,
+        resource: 'IMAGE',
+      });
 
       // Step 3: Attach the uploaded image to the product
       let numericId = product_id;
@@ -3601,18 +3803,26 @@ const handlers = {
       }
 
       const mediaMutation = `
-        mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
-          productCreateMedia(productId: $productId, media: $media) {
-            media {
-              ... on MediaImage {
-                id
-                image {
-                  url
-                  altText
+        mutation AddProductMedia(
+          $product: ProductUpdateInput!
+          $media: [CreateMediaInput!]
+        ) {
+          productUpdate(product: $product, media: $media) {
+            product {
+              id
+              media(first: 1, reverse: true) {
+                nodes {
+                  id
+                  ... on MediaImage {
+                    image {
+                      url
+                      altText
+                    }
+                  }
                 }
               }
             }
-            mediaUserErrors {
+            userErrors {
               field
               message
             }
@@ -3620,23 +3830,29 @@ const handlers = {
         }
       `;
       const mediaResult = await shopifyGQL(mediaMutation, {
-        productId: `gid://shopify/Product/${numericId}`,
+        product: { id: `gid://shopify/Product/${numericId}` },
         media: [
           {
-            originalSource: target.resourceUrl,
+            originalSource: resourceUrl,
             mediaContentType: 'IMAGE',
             alt: alt_text || '',
           },
         ],
       });
-      if (mediaResult.productCreateMedia.mediaUserErrors?.length) {
+      if (mediaResult.productUpdate.userErrors?.length) {
         throw new Error(
-          `Media errors: ${JSON.stringify(mediaResult.productCreateMedia.mediaUserErrors)}`
+          `Media errors: ${JSON.stringify(mediaResult.productUpdate.userErrors)}`
         );
       }
       // Return minimal confirmation — just the media ID
-      const media = mediaResult.productCreateMedia.media?.[0];
-      return { success: true, data: { mediaId: media?.id || null } };
+      const media = mediaResult.productUpdate.product?.media?.nodes?.[0];
+      return {
+        success: true,
+        data: {
+          mediaId: media?.id || null,
+          productId: mediaResult.productUpdate.product?.id || null,
+        },
+      };
     } catch (error) {
       return err(error.message);
     }
@@ -3819,7 +4035,7 @@ const handlers = {
 
 // ─── Server Setup ──────────────────────────────────────────────────────────────
 const server = new Server(
-  { name: 'Shopify MCP Server', version: '1.0.2' },
+  { name: 'Shopify MCP Server', version: '1.1.0' },
   { capabilities: { tools: {} } }
 );
 

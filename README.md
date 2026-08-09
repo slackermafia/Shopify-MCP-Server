@@ -12,6 +12,7 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 - **Customers** — list, search, get, create, update, delete, customer order history
 - **Inventory** — locations, get/adjust/set inventory levels
 - **Metaobjects** — definitions (list/create) and entries (list/create/update/delete) via GraphQL
+- **Shopify Files** — upload local, base64, or remote images and documents; list, inspect, and delete files via GraphQL
 - **Metafields** — get/set on products and variants
 - **Metafield definitions** — list, create, update, and delete definitions for products, variants, pages, collections, and other owner types
 - **Pages** — list, get, create, update, delete pages, including template suffix assignment
@@ -96,7 +97,8 @@ read_themes,write_themes,
 read_fulfillments,write_fulfillments,
 read_content,write_content,
 read_online_store_pages,write_online_store_pages,
-read_online_store_navigation,write_online_store_navigation
+read_online_store_navigation,write_online_store_navigation,
+read_files,write_files
 ```
 
 Scope groups by tool area:
@@ -119,13 +121,14 @@ Scope groups by tool area:
 | Discount codes | `read_discounts`, `write_discounts` |
 | Metaobject entries | `read_metaobjects`, `write_metaobjects` |
 | Metaobject definitions | `read_metaobject_definitions`, `write_metaobject_definitions` |
+| Shopify Files (images, videos, documents, and 3D models) | `read_files`, `write_files` |
 | Metafield definitions | Owner resource scopes, for example `read_products`, `write_products` for product definitions and `read_content`, `write_content`, `read_online_store_pages`, `write_online_store_pages` for page definitions |
 | Pages and page templates | `read_content`, `write_content`, `read_online_store_pages`, `write_online_store_pages` |
 | Themes and theme assets | `read_themes`, `write_themes` |
 
 The server does not currently implement blog or article tools. Page tools use Admin GraphQL's Page API and support `templateSuffix` for assigning page templates.
 
-## Available Tools (85)
+## Available Tools (89)
 
 ### Shop
 | Tool | Description |
@@ -238,8 +241,10 @@ The server does not currently implement blog or article tools. Page tools use Ad
 | `create_metaobject_definition` | Create a new metaobject definition with fields |
 | `list_metaobjects` | List metaobject entries by type |
 | `create_metaobject` | Create a new metaobject entry |
-| `update_metaobject` | Update metaobject fields |
+| `update_metaobject` | Create or update fields by type and handle, with compatibility for existing ID-based callers |
 | `delete_metaobject` | Delete a metaobject entry |
+
+File-reference fields accept the GID returned by `upload_file` as their string value.
 
 ### Metafield Definitions (GraphQL)
 | Tool | Description |
@@ -257,6 +262,15 @@ The server does not currently implement blog or article tools. Page tools use Ad
 | `create_page` | Create a page, including optional template suffix |
 | `update_page` | Update a page, including template suffix |
 | `delete_page` | Delete a page |
+
+### Shopify Files (GraphQL)
+
+| Tool | Description |
+|------|-------------|
+| `upload_file` | Upload an image, video, 3D model, PDF, or other file from a local path, base64 data, or supported public URL |
+| `list_files` | List Shopify Files assets with search filtering and cursor pagination |
+| `get_file` | Read a file's processing status and CDN URL by GID |
+| `delete_files` | Permanently delete up to 250 files by GID |
 
 ### Themes
 | Tool | Description |
